@@ -20,6 +20,20 @@
   }
   #hud b { color: #1d2733; }
 
+  /* 우측 상단 미니맵 (몬스터 위치 표시) */
+  #minimap-box {
+    position: fixed; top: 16px; right: 16px; z-index: 15;
+    width: 160px; height: 160px; border-radius: 50%; overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.55); box-shadow: 0 4px 18px rgba(0,0,0,0.3);
+    background: rgba(10,18,30,0.45);
+  }
+  #minimap { width: 100%; height: 100%; display: block; }
+  #minimap-label {
+    position: absolute; top: 4px; left: 0; right: 0; z-index: 2; pointer-events: none;
+    text-align: center; font-size: 10px; letter-spacing: 1px; color: rgba(255,255,255,0.7);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+
   /* 몬스터 조우(전투 진입) 순간 깜빡이는 배너 */
   #encounter {
     position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-20px);
@@ -155,6 +169,12 @@
 
   <!-- 조우 배너 -->
   <div id="encounter">⚔ 몬스터와 마주쳤다!</div>
+
+  <!-- 우측 상단 미니맵 -->
+  <div id="minimap-box">
+    <canvas id="minimap" width="160" height="160"></canvas>
+    <div id="minimap-label">미니맵</div>
+  </div>
 
   <!-- 전투 UI 오버레이 -->
   <div id="battle-ui">
@@ -337,7 +357,7 @@
      [A] 월드 씬
   ========================================================= */
   const world = new THREE.Scene();                                        // 월드 씬
-  world.fog = new THREE.Fog(COL_FOG, 30, 120);                            // 안개
+  world.fog = new THREE.Fog(COL_FOG, 45, 170);                            // 안개(넓은 맵에 맞게 더 멀리까지)
   world.background = makeSkyTexture(COL_SKY_TOP, COL_SKY_BOTTOM);         // 하늘 그라데이션
 
   const wAmbient = new THREE.AmbientLight(0xffffff, 0.75); world.add(wAmbient);    // 전체광
@@ -347,9 +367,10 @@
   wSun.shadow.camera.near=1; wSun.shadow.camera.far=120;
   wSun.shadow.camera.left=-60; wSun.shadow.camera.right=60; wSun.shadow.camera.top=60; wSun.shadow.camera.bottom=-60;
   wSun.shadow.bias=-0.0005; world.add(wSun);
+  world.add(wSun.target);                                                // 그림자가 플레이어를 따라오도록 타깃을 씬에 추가
 
   const ground = new THREE.Mesh(                                          // 바닥
-    new THREE.PlaneGeometry(400,400),
+    new THREE.PlaneGeometry(700,700),
     new THREE.MeshStandardMaterial({ color: COL_GROUND, roughness: 1, metalness: 0 }));
   ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; world.add(ground);
 
@@ -377,19 +398,19 @@
       new THREE.MeshStandardMaterial({ color:0x8a8d91, roughness:1, flatShading:true }));
     r.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3); r.position.y=0.4; r.castShadow=true; return r;
   }
-  for (let i=0;i<28;i++){ const t=makeTree();                                         // 나무 28
-    t.position.set((Math.random()-0.5)*160,0,(Math.random()-0.5)*160);
-    if (t.position.length()<8) continue; t.scale.setScalar(0.7+Math.random()*0.8); world.add(t); }
-  for (let i=0;i<18;i++){ const r=makeRock();                                         // 바위 18
-    r.position.x=(Math.random()-0.5)*160; r.position.z=(Math.random()-0.5)*160; world.add(r); }
+  for (let i=0;i<52;i++){ const t=makeTree();                                         // 나무 52 (넓은 구역)
+    t.position.set((Math.random()-0.5)*300,0,(Math.random()-0.5)*300);                 // ±150 범위
+    if (t.position.length()<10) continue; t.scale.setScalar(0.7+Math.random()*0.8); world.add(t); }
+  for (let i=0;i<32;i++){ const r=makeRock();                                         // 바위 32
+    r.position.x=(Math.random()-0.5)*300; r.position.z=(Math.random()-0.5)*300; world.add(r); } // ±150 범위
 
-  // 월드 몬스터(아이콘) — 각자 종류를 부여
+  // 월드 몬스터(아이콘) — 각자 종류를 부여, 맵 전체에 넓게 배치
   const monsters = [];
   for (let i=0;i<6;i++){
     const type = MONSTER_TYPES[Math.floor(Math.random()*MONSTER_TYPES.length)];        // 랜덤 종류
     const mon = makeMonster(type.color); mon.scale.setScalar(type.scale);
-    mon.position.set((Math.random()-0.5)*130,0,(Math.random()-0.5)*130);
-    if (mon.position.length()<22) mon.position.z -= 26;                                 // 시작점과 너무 가까우면 밀기
+    mon.position.set((Math.random()-0.5)*220,0,(Math.random()-0.5)*220);               // ±110 범위로 넓게
+    if (mon.position.length()<35) mon.position.z -= 40;                                 // 시작점과 너무 가까우면 밀기
     mon.userData.type = type;                                                           // 전투용 데이터 저장
     world.add(mon); monsters.push(mon);
   }
@@ -406,13 +427,13 @@
     return g;
   }
   const stones = [];                                                                  // 표지석 목록
-  const STONE_SPOTS = [ {x:18,z:-12}, {x:-22,z:14}, {x:30,z:24}, {x:-16,z:-30} ];      // 고정 배치(발견 가능하게)
+  const STONE_SPOTS = [ {x:45,z:-35}, {x:-60,z:40}, {x:75,z:60}, {x:-40,z:-75} ];      // 고정 배치(넓게 흩어 발견 가능하게)
   STONE_SPOTS.forEach((s,i)=>{ const st=makeStone(); st.position.set(s.x,0,s.z);
     st.userData.read=false; st.userData.text=LORE[i]; world.add(st); stones.push(st); });
 
   // 떠다니는 빛 입자
-  const PCOUNT = 400; const pPos = new Float32Array(PCOUNT*3);
-  for (let i=0;i<PCOUNT;i++){ pPos[i*3]=(Math.random()-0.5)*160; pPos[i*3+1]=Math.random()*40; pPos[i*3+2]=(Math.random()-0.5)*160; }
+  const PCOUNT = 500; const pPos = new Float32Array(PCOUNT*3);
+  for (let i=0;i<PCOUNT;i++){ pPos[i*3]=(Math.random()-0.5)*300; pPos[i*3+1]=Math.random()*40; pPos[i*3+2]=(Math.random()-0.5)*300; }
   const pGeo = new THREE.BufferGeometry(); pGeo.setAttribute("position", new THREE.BufferAttribute(pPos,3));
   const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({
     color:0xfff2c4, size:0.35, transparent:true, opacity:0.85, depthWrite:false, blending:THREE.AdditiveBlending }));
@@ -654,6 +675,7 @@
 
     // 화면 전환
     hudEl.style.display = "none"; battleUI.classList.add("show");
+    document.getElementById("minimap-box").style.display = "none";        // 전투 중 미니맵 숨김
     setNote("고개를 ↑ ↓ ← → 로 움직여 시전 (방향키도 가능)");
     renderPass.scene = battleScene; renderPass.camera = battleCam;        // 후처리 대상 = 전투 씬
 
@@ -742,6 +764,7 @@
     }
     battle.active = false; battle.dying = false; mode = "world";          // 월드 모드로 전환
     battleUI.classList.remove("show"); hudEl.style.display = "";          // UI 토글
+    document.getElementById("minimap-box").style.display = "";            // 월드 복귀 시 미니맵 표시
     setNote("현재: 키보드 임시 조작");
     renderPass.scene = world; renderPass.camera = worldCam;              // 후처리 대상 = 월드 씬
     // 플레이어를 살짝 뒤로 물려 즉시 재조우 방지 + 쿨다운
@@ -770,6 +793,7 @@
     detectFace(performance.now());                                       // 얼굴(코) 위치 인식 갱신
     if (mode === "world") updateWorld(dt);                               // 월드 갱신
     else { updateBattle(dt, t); tickFaceBattle(); }                      // 전투 갱신 + 얼굴 방향 입력
+    drawMinimap(t);                                                      // 미니맵 갱신
 
     // 빛 입자는 월드에서만 보이므로 월드 모드일 때만 갱신
     if (mode === "world") {
@@ -804,6 +828,10 @@
     const desired = player.position.clone().add(CAM_OFFSET);
     worldCam.position.lerp(desired, Math.min(1,dt*4));
     worldCam.lookAt(player.position.x, player.position.y+1.5, player.position.z);
+
+    // 태양/그림자가 플레이어를 따라오게(넓은 맵에서도 그림자 유지)
+    wSun.position.set(player.position.x+20, 30, player.position.z+15);
+    wSun.target.position.copy(player.position); wSun.target.updateMatrixWorld();
 
     // 월드 몬스터 부유/회전(항상)
     monsters.forEach((m,i)=>{ m.position.y=Math.sin(t*1.5+i)*0.25; m.rotation.y += dt*0.6; });
@@ -911,6 +939,43 @@
     if (memoriesFound >= MEMORIES.length) showEnding();                // 마지막 기억이면 엔딩으로
     else paused = false;                                               // 아니면 탐험 재개
   });
+
+  /* ===== 미니맵(우측 상단): 몬스터/표지석/플레이어 위치 표시 ===== */
+  const miniCanvas = document.getElementById("minimap");
+  const miniCtx = miniCanvas.getContext("2d");
+  const MAP_HALF = 150;                                                  // 미니맵이 담는 월드 반경(±150)
+  function w2m(x, z) {                                                   // 월드 좌표 → 미니맵 픽셀(원 밖이면 테두리로 클램프)
+    const S = miniCanvas.width;
+    let mx = (x/MAP_HALF*0.5+0.5)*S, my = (z/MAP_HALF*0.5+0.5)*S;
+    const dx = mx-S/2, dy = my-S/2, d = Math.hypot(dx,dy), R = S/2-5;
+    if (d > R) { mx = S/2+dx/d*R; my = S/2+dy/d*R; }
+    return [mx, my];
+  }
+  function drawMinimap(t) {
+    const g = miniCtx, S = miniCanvas.width; g.clearRect(0,0,S,S);
+    // 배경 + 링
+    g.fillStyle = "rgba(40,55,42,0.5)"; g.beginPath(); g.arc(S/2,S/2,S/2,0,Math.PI*2); g.fill();
+    g.strokeStyle = "rgba(255,255,255,0.12)"; g.lineWidth = 1;
+    g.beginPath(); g.arc(S/2,S/2,S/2*0.6,0,Math.PI*2); g.stroke();
+    g.beginPath(); g.moveTo(S/2,6); g.lineTo(S/2,S-6); g.moveTo(6,S/2); g.lineTo(S-6,S/2); g.stroke();
+    // 표지석(시안 작은 사각형)
+    g.fillStyle = "rgba(0,212,255,0.85)";
+    stones.forEach(s=>{ const [mx,my]=w2m(s.position.x,s.position.z); g.fillRect(mx-2,my-2,4,4); });
+    // 몬스터(붉은 점, 깜빡임)
+    const pulse = 3 + Math.sin(t*4)*1;
+    monsters.forEach(m=>{ const [mx,my]=w2m(m.position.x,m.position.z);
+      g.fillStyle = "#ff3b5c"; g.shadowColor = "#ff3b5c"; g.shadowBlur = 8;
+      g.beginPath(); g.arc(mx,my,pulse,0,Math.PI*2); g.fill(); });
+    g.shadowBlur = 0;
+    // 플레이어(흰 화살표, 바라보는 방향)
+    const [px,py] = w2m(player.position.x, player.position.z);
+    const a = player.rotation.y;                                         // 전진 방향 = (sinθ, cosθ)
+    const ang = Math.atan2(Math.cos(a), Math.sin(a));                    // 캔버스 좌표계 각도
+    g.save(); g.translate(px,py); g.rotate(ang);
+    g.fillStyle = "#ffffff"; g.shadowColor = "#ffffff"; g.shadowBlur = 6;
+    g.beginPath(); g.moveTo(7,0); g.lineTo(-5,-5); g.lineTo(-5,5); g.closePath(); g.fill();
+    g.restore(); g.shadowBlur = 0;
+  }
 
   animate();                                                            // 루프 시작
 
