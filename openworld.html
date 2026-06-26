@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>로폴리 오픈월드 — 몽환의 들판</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }                 /* 기본 여백 제거 */
+  html, body { width: 100%; height: 100%; overflow: hidden; }          /* 스크롤 방지 */
+  body { background: #c2d1e0; font-family: "Segoe UI", system-ui, sans-serif; } /* 임시 배경색 */
+  #scene-canvas { display: block; width: 100%; height: 100%; }         /* 캔버스 전체화면 */
+
+  /* 좌상단 조작 안내 HUD (월드 모드 전용) */
+  #hud {
+    position: fixed; top: 16px; left: 16px; z-index: 10;
+    color: #2c3a4a; font-size: 13px; line-height: 1.7;
+    background: rgba(255,255,255,0.45); backdrop-filter: blur(4px);
+    padding: 10px 14px; border-radius: 10px; pointer-events: none;
+    text-shadow: 0 1px 2px rgba(255,255,255,0.6);
+  }
+  #hud b { color: #1d2733; }
+
+  /* 몬스터 조우(전투 진입) 순간 깜빡이는 배너 */
+  #encounter {
+    position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-20px);
+    z-index: 30; padding: 12px 28px; border-radius: 12px;
+    background: rgba(60,30,50,0.85); color: #ffd9e2; font-size: 18px; font-weight: 700;
+    letter-spacing: 1px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    opacity: 0; transition: opacity .4s, transform .4s; pointer-events: none;
+  }
+  #encounter.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* 우측 하단 웹캠 미리보기 박스 (월드/전투 공통) */
+  #webcam-box {
+    position: fixed; right: 16px; bottom: 16px; z-index: 25;
+    width: 220px; height: 150px; border-radius: 12px; overflow: hidden;
+    border: 2px solid rgba(255,255,255,0.6); box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+    background: #222;
+  }
+  #webcam-video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); } /* 셀카 반전 */
+  #webcam-canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); z-index: 1; pointer-events: none; } /* 코 위치 시각화 오버레이(영상과 동일하게 반전) */
+  #webcam-label {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+    font-size: 11px; color: #fff; background: rgba(0,0,0,0.45); padding: 3px 8px; text-align: center; letter-spacing: 1px;
+  }
+  #webcam-note {
+    position: absolute; bottom: 0; left: 0; right: 0; z-index: 2;
+    font-size: 10px; color: #ffe; background: rgba(0,0,0,0.4); padding: 2px 6px; text-align: center;
+  }
+
+  /* =========================================================
+     전투 UI 오버레이 (포켓몬식 구도) — 평소 숨김
+  ========================================================= */
+  #battle-ui { position: fixed; inset: 0; z-index: 20; display: none; pointer-events: none; }
+  #battle-ui.show { display: block; }
+
+  /* HP 박스 공통 */
+  .hpbox {
+    position: absolute; min-width: 250px;
+    background: rgba(12,16,42,0.9); border: 2px solid #00d4ff; border-radius: 12px;
+    padding: 9px 13px; box-shadow: 0 0 18px rgba(0,212,255,0.35);
+  }
+  .hpbox.enemy  { top: 18px; left: 18px; }                      /* 적 HP: 좌상단 */
+  .hpbox.player { right: 250px; bottom: 18px; }                 /* 내 HP: 우하단(웹캠 왼쪽) */
+  .hpbox .row { display:flex; justify-content:space-between; align-items:center; }
+  .hpbox .nm { font-weight:700; font-size:15px; color:#fff; letter-spacing:1px; }
+  .hpbox .lvl { font-size:12px; color:#ffd27b; }
+  .hp-track { height: 11px; background:#05060f; border-radius:7px; margin-top:7px; overflow:hidden; border:1px solid rgba(255,255,255,0.1); }
+  .hp-fill { height:100%; width:100%; border-radius:7px; transition: width .5s ease; }
+  .hp-fill.enemy  { background: linear-gradient(90deg,#ff2f6e,#ff6e9c); box-shadow:0 0 12px #ff2f6e; }
+  .hp-fill.player { background: linear-gradient(90deg,#2fd96e,#6effa0); box-shadow:0 0 12px #2fd96e; }
+  .hp-num { font-size:11px; color:#7c86b8; text-align:right; margin-top:3px; }
+
+  /* 중앙 방향 룬 */
+  #direction-prompt { position:absolute; top: 42%; left: 50%; transform: translate(-50%,-50%); text-align:center; }
+  .dir-arrow { font-size: 100px; font-weight:900; line-height:1; color:#fff;
+    text-shadow: 0 0 16px #00d4ff, 0 0 40px #7b2ff7; animation: dirpulse 0.9s ease-in-out infinite; }
+  @keyframes dirpulse { 0%,100%{ transform: scale(1); opacity:.9;} 50%{ transform: scale(1.18); opacity:1;} }
+  .dir-label { margin-top:2px; font-size:20px; letter-spacing:6px; color:#00d4ff; text-shadow:0 0 12px #00d4ff; font-weight:700; }
+
+  /* 하단 좌측 대사/명령 박스 */
+  #command-box {
+    position: absolute; left: 18px; bottom: 18px; width: min(46%, 620px); min-height: 110px;
+    background: rgba(10,14,39,0.92); border: 3px solid #7b2ff7; border-radius: 14px;
+    box-shadow: 0 0 22px rgba(123,47,247,0.4); padding: 16px 20px;
+    display:flex; flex-direction:column; justify-content:space-between;
+  }
+  #command-text { font-size: clamp(15px,2vw,20px); line-height:1.6; color:#fff; min-height:48px; }
+  #orbs { display:flex; gap:11px; margin-top:8px; }
+  .orb { width: 20px; height:20px; border-radius:50%; border: 2px solid rgba(0,212,255,0.45); background: rgba(0,212,255,0.05); transition: all .25s; }
+  .orb.filled { background: radial-gradient(circle,#fff,#00d4ff 50%, #7b2ff7); box-shadow: 0 0 14px #00d4ff; border-color:#fff; transform: scale(1.15); }
+
+  /* 피격/시전 화면 플래시 */
+  #flash { position:absolute; inset:0; background: radial-gradient(circle at 70% 35%, rgba(255,255,255,0.9), transparent 45%); opacity:0; }
+  #flash.go { animation: flashgo 0.4s ease-out; }
+  @keyframes flashgo { 0%{opacity:0;} 30%{opacity:1;} 100%{opacity:0;} }
+
+  /* 씬 전환용 안개 페이드 오버레이 (월드↔전투 전환 시 뿌옇게) */
+  #transition {
+    position: fixed; inset: 0; z-index: 100; pointer-events: none; opacity: 0;
+    background: radial-gradient(circle at 50% 45%, rgba(216,226,238,0.65), rgba(194,209,224,0.97)); /* 안개 톤 */
+    backdrop-filter: blur(7px);                                          /* 뒤 화면을 흐릿하게(안개감) */
+    transition: opacity 0.45s ease;                                      /* 부드러운 페이드 */
+  }
+  #transition.show { opacity: 1; }                                       /* 표시 상태 */
+
+  /* ===== 스토리 오버레이(인트로 / 기억 조각 / 엔딩) ===== */
+  .overlay-screen {
+    position: fixed; inset: 0; z-index: 50; display: none;
+    align-items: center; justify-content: center; padding: 30px; text-align: center;
+    background: radial-gradient(circle at 50% 30%, rgba(20,27,69,0.85), rgba(5,6,15,0.96)); /* 어둑한 배경 */
+  }
+  .overlay-screen.show { display: flex; }
+  .panel-box {
+    max-width: 660px; background: rgba(15,21,53,0.6);
+    border: 1px solid rgba(123,47,247,0.5); border-radius: 16px; padding: 38px;
+    box-shadow: 0 0 50px rgba(0,0,0,0.5), inset 0 0 30px rgba(123,47,247,0.12);
+  }
+  .panel-rune  { font-size: 18px; letter-spacing: 8px; color: #00d4ff; text-shadow: 0 0 12px #00d4ff; margin-bottom: 14px; }
+  .panel-title { font-size: clamp(24px,4vw,32px); font-weight: 800; letter-spacing: 3px; color: #fff;
+    text-shadow: 0 0 10px #00d4ff, 0 0 26px #7b2ff7; margin-bottom: 18px; }
+  .panel-text  { font-size: clamp(15px,2.2vw,19px); line-height: 2; color: #cdd6f5; white-space: pre-line; min-height: 60px; }
+  .panel-btn {
+    margin-top: 24px; font-size: 16px; font-weight: 700; letter-spacing: 2px; padding: 12px 32px; border-radius: 10px;
+    color: #fff; background: rgba(123,47,247,0.2); border: 2px solid #7b2ff7; cursor: pointer;
+    box-shadow: 0 0 18px rgba(123,47,247,0.5); transition: all .2s;
+  }
+  .panel-btn:hover { background: rgba(0,212,255,0.2); border-color: #00d4ff; box-shadow: 0 0 24px #00d4ff; }
+
+  /* 표지석/유물 로어 토스트 */
+  #lore {
+    position: fixed; left: 50%; bottom: 200px; transform: translateX(-50%) translateY(12px); z-index: 30;
+    max-width: 560px; padding: 14px 22px; border-radius: 12px; background: rgba(10,14,39,0.85);
+    border: 1px solid rgba(0,212,255,0.4); color: #cdd6f5; font-size: 15px; line-height: 1.7;
+    box-shadow: 0 0 22px rgba(0,0,0,0.4); opacity: 0; transition: opacity .4s, transform .4s; pointer-events: none;
+  }
+  #lore.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* HUD 목표 진행도 */
+  #goal { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); color: #2c3a4a; font-size: 13px; }
+  #goal b { color: #2f7fb0; }
+</style>
+</head>
+<body>
+  <canvas id="scene-canvas"></canvas>
+
+  <!-- 월드 조작 안내 -->
+  <div id="hud">
+    🍃 <b>몽환의 들판</b><br>
+    이동: <b>고개 기울이기</b> (또는 W A S D)<br>
+    전투: 고개를 <b>↑↓←→</b> 로 움직여 시전<br>
+    <b>C</b>키: 중심 자세 재설정 · 몬스터에 다가가면 전투
+    <div id="goal">되찾은 기억 <b id="goal-num">0</b> / 6</div>
+  </div>
+
+  <!-- 조우 배너 -->
+  <div id="encounter">⚔ 몬스터와 마주쳤다!</div>
+
+  <!-- 전투 UI 오버레이 -->
+  <div id="battle-ui">
+    <div class="hpbox enemy">
+      <div class="row"><span class="nm" id="enemy-name">몬스터</span><span class="lvl" id="enemy-lvl">Lv.5</span></div>
+      <div class="hp-track"><div class="hp-fill enemy" id="enemy-hp"></div></div>
+      <div class="hp-num" id="enemy-hp-num">HP 100/100</div>
+    </div>
+    <div class="hpbox player">
+      <div class="row"><span class="nm">엘드린</span><span class="lvl">Lv.12</span></div>
+      <div class="hp-track"><div class="hp-fill player" id="player-hp"></div></div>
+      <div class="hp-num" id="player-hp-num">HP 100/100</div>
+    </div>
+    <div id="direction-prompt"></div>
+    <div id="command-box">
+      <div id="command-text">…</div>
+      <div id="orbs"></div>
+    </div>
+    <div id="flash"></div>
+  </div>
+
+  <!-- 웹캠 미리보기 (공통) -->
+  <div id="webcam-box">
+    <div id="webcam-label">🔮 인식 미리보기</div>
+    <video id="webcam-video" autoplay playsinline muted></video>
+    <canvas id="webcam-canvas"></canvas>
+    <div id="webcam-note">얼굴 인식 로딩…</div>
+  </div>
+
+  <!-- 시작 인트로 내레이션 -->
+  <div class="overlay-screen" id="intro">
+    <div class="panel-box">
+      <div class="panel-rune">ᛗ ᛖ ᛗ ᛟ ᚱ ᚤ</div>
+      <div class="panel-title">잃어버린 기억</div>
+      <div class="panel-text" id="intro-text"></div>
+      <button class="panel-btn" id="intro-btn">눈을 뜬다 ▸</button>
+    </div>
+  </div>
+
+  <!-- 기억 조각 / 엔딩 패널 -->
+  <div class="overlay-screen" id="memory-panel">
+    <div class="panel-box">
+      <div class="panel-rune" id="memory-rune">기억의 조각</div>
+      <div class="panel-title" id="memory-title">기억이 돌아온다…</div>
+      <div class="panel-text" id="memory-text"></div>
+      <button class="panel-btn" id="memory-btn">계속 ▸</button>
+    </div>
+  </div>
+
+  <!-- 표지석/유물 로어 토스트 -->
+  <div id="lore"></div>
+
+  <!-- 씬 전환용 안개 오버레이 -->
+  <div id="transition"></div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+  import * as THREE from "three";                                                  // Three.js 코어
+  import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";   // 후처리 파이프라인
+  import { RenderPass } from "three/addons/postprocessing/RenderPass.js";           // 씬 렌더 패스
+  import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"; // 블룸 패스
+  import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+  import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs"; // MediaPipe 얼굴 랜드마크           // 톤매핑/출력 패스
+
+  /* ===== 색 팔레트 (차분/몽환) ===== */
+  const COL_SKY_TOP="#aec6e8", COL_SKY_BOTTOM="#cdd9e5", COL_FOG="#c2d1e0", COL_GROUND="#7a8b5c";
+
+  /* ===== 렌더러 ===== */
+  const canvas = document.getElementById("scene-canvas");                 // 캔버스
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });  // 렌더러 생성
+  renderer.setSize(innerWidth, innerHeight);                              // 크기 = 창
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));                  // 픽셀비 제한
+  renderer.shadowMap.enabled = true;                                      // 그림자 on
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;                       // soft shadow
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;                     // ACES 톤매핑
+  renderer.toneMappingExposure = 1.05;                                    // 노출
+  renderer.outputColorSpace = THREE.SRGBColorSpace;                       // sRGB 출력
+
+  /* ===== 하늘 그라데이션 텍스처 (월드 배경) ===== */
+  function makeSkyTexture(top, bottom) {                                   // 위/아래 색으로 세로 그라데이션 텍스처 생성
+    const c = document.createElement("canvas"); c.width = 2; c.height = 256;
+    const x = c.getContext("2d"); const g = x.createLinearGradient(0,0,0,256);
+    g.addColorStop(0, top); g.addColorStop(1, bottom);
+    x.fillStyle = g; x.fillRect(0,0,2,256);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; return tex;
+  }
+
+  /* =========================================================
+     공통 캐릭터/몬스터 생성 함수 (월드·전투에서 재사용)
+  ========================================================= */
+  // --- 마법사(플레이어): 박스 몸통 + 구 머리 + 원뿔 모자 → 하나의 Group ---
+  function makeWizard() {
+    const g = new THREE.Group();                                                                // 부품 묶음
+    const body = new THREE.Mesh(                                                                 // 몸통
+      new THREE.BoxGeometry(1.1, 1.4, 0.8, 4,4,4),
+      new THREE.MeshStandardMaterial({ color: 0x6b7f9e, roughness: 0.9, flatShading: true }));   // 차분한 청회색
+    body.position.y = 1.0; body.castShadow = true; g.add(body);
+    const head = new THREE.Mesh(                                                                 // 머리
+      new THREE.SphereGeometry(0.55, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0xe8d2b5, roughness: 0.8, flatShading: true }));   // 살구색
+    head.position.y = 2.05; head.castShadow = true; g.add(head);
+    const hat = new THREE.Mesh(                                                                  // 모자
+      new THREE.ConeGeometry(0.6, 1.0, 8),
+      new THREE.MeshStandardMaterial({ color: 0x5b4b7a, roughness: 0.85, flatShading: true }));  // 차분한 보라
+    hat.position.y = 2.75; hat.castShadow = true; g.add(hat);
+    return g;
+  }
+
+  // --- 몬스터: 다면체 몸통 + 뿔 + 빛나는 눈 (color로 종류 구분) ---
+  function makeMonster(color) {
+    const m = new THREE.Group();
+    const mb = new THREE.Mesh(                                                                   // 몸통
+      new THREE.IcosahedronGeometry(0.9, 0),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.9, flatShading: true, emissive: 0x1a0a14, emissiveIntensity: 0.6 }));
+    mb.position.y = 1.0; mb.castShadow = true; m.add(mb);
+    const hornMat = new THREE.MeshStandardMaterial({ color: 0x2c2030, flatShading: true });      // 뿔
+    for (const dx of [-0.35, 0.35]) {
+      const h = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.6, 6), hornMat);
+      h.position.set(dx, 1.7, 0); m.add(h);
+    }
+    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffe14d, emissive: 0xffcc00, emissiveIntensity: 1.3 }); // 빛나는 눈
+    for (const dx of [-0.3, 0.3]) {
+      const e = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), eyeMat);
+      e.position.set(dx, 1.1, 0.8); m.add(e);
+    }
+    m.userData.bodyMat = mb.material;                                                            // (피격 발광용) 몸통 재질 저장
+    return m;
+  }
+
+  /* =========================================================
+     몬스터 종류 데이터 (전투 스탯/외형)
+  ========================================================= */
+  const MONSTER_TYPES = [
+    { name:"고블린 척후병", lvl:"Lv.5",  color:0x6e3b52, scale:1.0, hp:100, dmg:100, counter:0  },
+    { name:"그림자 늑대",   lvl:"Lv.9",  color:0x3b4a6e, scale:1.2, hp:100, dmg:50,  counter:18 },
+    { name:"마왕 발록",     lvl:"Lv.20", color:0x6e2b2b, scale:1.5, hp:120, dmg:40,  counter:22 },
+  ];
+
+  /* ===== 스토리 데이터: "잃어버린 기억" ===== */
+  const INTRO_TEXT =                                                      // 시작 인트로 내레이션
+`눈을 떴다.
+이름도, 어떻게 이곳에 왔는지도 기억나지 않는다.
+안개 낀 들판 곳곳에 룬이 희미하게 빛나고,
+어둠의 형상들이 어슬렁거린다.
+…그것들을 쓰러뜨릴 때마다, 잊었던 무언가가 떠오른다.`;
+
+  const MEMORIES = [                                                      // 몬스터 처치 시 하나씩 돌아오는 기억 조각
+    "차가운 바람 속에서 누군가 내 이름을 불렀다… '엘드린.'",
+    "불타는 탑이 보인다. 나는 무언가를 막기 위해 밤새 룬을 새기고 있었다.",
+    "한 아이가 내 소맷자락을 붙잡았다. '꼭 돌아온다고 약속했잖아요.'",
+    "어둠은 바깥에서 온 것이 아니었다. 그것은 내 안에서 자라났다.",
+    "봉인의 대가는 기억이었다. 나는 나를 지워, 어둠과 함께 이 들판에 가두었다.",
+    "마지막 조각이 맞춰졌다. 봉인이 약해지고 있다… 그리고 어둠의 얼굴은 나와 닮았다.",
+  ];
+
+  const ENDING_TEXT =                                                     // 모든 기억 회수 후 엔딩
+`모든 기억이 돌아왔다.
+나는 이 어둠을 봉인한 수호자였고,
+그 대가로 내 이름과 기억을 스스로 지웠다.
+이제 마지막 어둠의 정체를 안다 — 그것은, 나 자신이다.
+
+— 1막 끝 —`;
+
+  const LORE = [                                                         // 맵 속 표지석/유물에 다가가면 뜨는 환경 서사
+    "이끼 낀 비석에 글자가 새겨져 있다 — '룬의 수호자, 여기 잠들다.' 이름이 있던 자리는 긁혀 지워져 있다.",
+    "부서진 룬 제단. 식은 재 사이로 희미한 온기가 남아 있다. 누군가 최근까지 불을 지폈던 것처럼.",
+    "바람에 깎인 표지석: '탑이 무너진 곳으로… 그가 돌아오기를.'",
+    "낡은 목각 인형이 풀숲에 놓여 있다. 작은 손에 꼭 맞을 크기다.",
+  ];
+
+  /* =========================================================
+     [A] 월드 씬
+  ========================================================= */
+  const world = new THREE.Scene();                                        // 월드 씬
+  world.fog = new THREE.Fog(COL_FOG, 30, 120);                            // 안개
+  world.background = makeSkyTexture(COL_SKY_TOP, COL_SKY_BOTTOM);         // 하늘 그라데이션
+
+  const wAmbient = new THREE.AmbientLight(0xffffff, 0.75); world.add(wAmbient);    // 전체광
+  const wSun = new THREE.DirectionalLight(0xfff3e0, 1.4);                          // 태양광
+  wSun.position.set(20,30,15); wSun.castShadow = true;
+  wSun.shadow.mapSize.set(2048,2048);
+  wSun.shadow.camera.near=1; wSun.shadow.camera.far=120;
+  wSun.shadow.camera.left=-60; wSun.shadow.camera.right=60; wSun.shadow.camera.top=60; wSun.shadow.camera.bottom=-60;
+  wSun.shadow.bias=-0.0005; world.add(wSun);
+
+  const ground = new THREE.Mesh(                                          // 바닥
+    new THREE.PlaneGeometry(400,400),
+    new THREE.MeshStandardMaterial({ color: COL_GROUND, roughness: 1, metalness: 0 }));
+  ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; world.add(ground);
+
+  // 월드 카메라 (3인칭 위에서 내려다봄)
+  const worldCam = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 500);
+  const CAM_OFFSET = new THREE.Vector3(0, 9, 13);                         // 캐릭터 기준 오프셋
+
+  // 월드 플레이어
+  const player = makeWizard(); player.position.set(0,0,0); world.add(player);
+
+  // 나무
+  function makeTree() {
+    const t = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.35,1.6,6),
+      new THREE.MeshStandardMaterial({ color:0x7a5e44, roughness:1, flatShading:true }));
+    trunk.position.y=0.8; trunk.castShadow=true; t.add(trunk);
+    const leafMat = new THREE.MeshStandardMaterial({ color:0x6f8f63, roughness:1, flatShading:true });
+    for (let i=0;i<3;i++){ const l=new THREE.Mesh(new THREE.IcosahedronGeometry(1.0-i*0.22,0), leafMat);
+      l.position.y=1.7+i*0.7; l.castShadow=true; t.add(l); }
+    return t;
+  }
+  // 바위
+  function makeRock() {
+    const r = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6+Math.random()*0.5,0),
+      new THREE.MeshStandardMaterial({ color:0x8a8d91, roughness:1, flatShading:true }));
+    r.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3); r.position.y=0.4; r.castShadow=true; return r;
+  }
+  for (let i=0;i<28;i++){ const t=makeTree();                                         // 나무 28
+    t.position.set((Math.random()-0.5)*160,0,(Math.random()-0.5)*160);
+    if (t.position.length()<8) continue; t.scale.setScalar(0.7+Math.random()*0.8); world.add(t); }
+  for (let i=0;i<18;i++){ const r=makeRock();                                         // 바위 18
+    r.position.x=(Math.random()-0.5)*160; r.position.z=(Math.random()-0.5)*160; world.add(r); }
+
+  // 월드 몬스터(아이콘) — 각자 종류를 부여
+  const monsters = [];
+  for (let i=0;i<6;i++){
+    const type = MONSTER_TYPES[Math.floor(Math.random()*MONSTER_TYPES.length)];        // 랜덤 종류
+    const mon = makeMonster(type.color); mon.scale.setScalar(type.scale);
+    mon.position.set((Math.random()-0.5)*130,0,(Math.random()-0.5)*130);
+    if (mon.position.length()<22) mon.position.z -= 26;                                 // 시작점과 너무 가까우면 밀기
+    mon.userData.type = type;                                                           // 전투용 데이터 저장
+    world.add(mon); monsters.push(mon);
+  }
+
+  // 표지석/유물(빛나는 룬 비석) — 다가가면 환경 서사 표시
+  function makeStone() {
+    const g = new THREE.Group();
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(0.8, 2.0, 0.4),                 // 돌 비석
+      new THREE.MeshStandardMaterial({ color:0x8a8d91, roughness:1, flatShading:true }));
+    slab.position.y = 1.0; slab.rotation.z = (Math.random()-0.5)*0.18; slab.castShadow = true; g.add(slab);
+    const rune = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0),                // 위에 떠 있는 빛나는 룬 결정
+      new THREE.MeshStandardMaterial({ color:0x00d4ff, emissive:0x00d4ff, emissiveIntensity:1.6 }));
+    rune.position.y = 2.5; g.add(rune); g.userData.rune = rune;
+    return g;
+  }
+  const stones = [];                                                                  // 표지석 목록
+  const STONE_SPOTS = [ {x:18,z:-12}, {x:-22,z:14}, {x:30,z:24}, {x:-16,z:-30} ];      // 고정 배치(발견 가능하게)
+  STONE_SPOTS.forEach((s,i)=>{ const st=makeStone(); st.position.set(s.x,0,s.z);
+    st.userData.read=false; st.userData.text=LORE[i]; world.add(st); stones.push(st); });
+
+  // 떠다니는 빛 입자
+  const PCOUNT = 400; const pPos = new Float32Array(PCOUNT*3);
+  for (let i=0;i<PCOUNT;i++){ pPos[i*3]=(Math.random()-0.5)*160; pPos[i*3+1]=Math.random()*40; pPos[i*3+2]=(Math.random()-0.5)*160; }
+  const pGeo = new THREE.BufferGeometry(); pGeo.setAttribute("position", new THREE.BufferAttribute(pPos,3));
+  const particles = new THREE.Points(pGeo, new THREE.PointsMaterial({
+    color:0xfff2c4, size:0.35, transparent:true, opacity:0.85, depthWrite:false, blending:THREE.AdditiveBlending }));
+  world.add(particles);
+
+  /* =========================================================
+     [B] 전투 씬 (로폴리 3D, 포켓몬식 구도)
+  ========================================================= */
+  const battleScene = new THREE.Scene();                                  // 전투 전용 씬
+  battleScene.fog = new THREE.Fog("#2a2740", 18, 60);                     // 약간 어둑한 안개(드라마틱)
+  battleScene.background = makeSkyTexture("#3a3a5e", "#6a6a86");          // 어스름한 하늘
+
+  const bAmbient = new THREE.AmbientLight(0xbcccff, 0.7); battleScene.add(bAmbient);  // 전체광(살짝 푸른빛)
+  const bSun = new THREE.DirectionalLight(0xfff0d6, 1.5);                             // 방향광
+  bSun.position.set(-10, 18, 8); bSun.castShadow = true;
+  bSun.shadow.mapSize.set(1024,1024);
+  bSun.shadow.camera.near=1; bSun.shadow.camera.far=60;
+  bSun.shadow.camera.left=-20; bSun.shadow.camera.right=20; bSun.shadow.camera.top=20; bSun.shadow.camera.bottom=-20;
+  bSun.shadow.bias=-0.0005; battleScene.add(bSun);
+  const bRim = new THREE.PointLight(0x7b2ff7, 1.2, 40); bRim.position.set(8,6,-6); battleScene.add(bRim); // 보라 림라이트
+
+  // 전투 바닥(원형) + 두 발판
+  const arena = new THREE.Mesh(new THREE.CircleGeometry(30, 48),
+    new THREE.MeshStandardMaterial({ color:0x5f6f48, roughness:1 }));     // 세이지 그린 원형 바닥
+  arena.rotation.x = -Math.PI/2; arena.receiveShadow = true; battleScene.add(arena);
+
+  function makePlatform(color) {                                          // 살짝 솟은 발판
+    const p = new THREE.Mesh(new THREE.CylinderGeometry(3, 3.2, 0.4, 24),
+      new THREE.MeshStandardMaterial({ color, roughness:0.9, emissive:color, emissiveIntensity:0.12 }));
+    p.position.y = 0.2; p.receiveShadow = true; return p;
+  }
+  const BATTLE_PLAYER_POS  = new THREE.Vector3(-5, 0, 3);                 // 플레이어 위치(좌하단 앞)
+  const BATTLE_MONSTER_POS = new THREE.Vector3( 5, 0, -4);               // 몬스터 위치(우상단 뒤)
+  const playerPlat  = makePlatform(0x4a6a7a); playerPlat.position.set(BATTLE_PLAYER_POS.x,0.2,BATTLE_PLAYER_POS.z);  battleScene.add(playerPlat);
+  const monsterPlat = makePlatform(0x5b3a6a); monsterPlat.position.set(BATTLE_MONSTER_POS.x,0.2,BATTLE_MONSTER_POS.z); battleScene.add(monsterPlat);
+
+  // 전투용 플레이어(뒷모습): 카메라가 뒤에 있으므로 몬스터를 바라보게 회전
+  const battlePlayer = makeWizard();
+  battlePlayer.position.copy(BATTLE_PLAYER_POS);
+  battlePlayer.lookAt(BATTLE_MONSTER_POS.x, 1, BATTLE_MONSTER_POS.z);     // 몬스터 쪽을 향함 = 등이 카메라로
+  battleScene.add(battlePlayer);
+
+  // 전투용 몬스터(매 전투마다 교체할 자리)
+  let battleMonster = null;
+
+  // 전투 카메라(플레이어 어깨 너머 시점)
+  const battleCam = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 500);
+  battleCam.position.set(-9, 5.5, 9);                                     // 플레이어 뒤 왼쪽 위
+  battleCam.lookAt(1, 1.5, -2);                                           // 몬스터 방향을 바라봄
+
+  // 마법 투사체(빛 구슬) — 재사용
+  const bolt = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12),
+    new THREE.MeshStandardMaterial({ color:0xffffff, emissive:0x00d4ff, emissiveIntensity:2.0 }));
+  bolt.visible = false; battleScene.add(bolt);
+
+  /* =========================================================
+     후처리 (월드/전투 공용) — RenderPass의 scene/camera만 바꿔 끼움
+  ========================================================= */
+  const composer = new EffectComposer(renderer);
+  const renderPass = new RenderPass(world, worldCam);                     // 처음엔 월드 기준
+  composer.addPass(renderPass);
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.45, 0.7, 0.82)); // 블룸 약하게
+  composer.addPass(new OutputPass());
+
+  /* =========================================================
+     입력 (월드: WASD / 전투: 방향키)
+  ========================================================= */
+  const keys = { w:false, a:false, s:false, d:false };                    // 월드 이동 키 상태
+  addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    if (mode === "world" && k in keys) keys[k] = true;                    // 월드 모드: WASD 이동
+    if (mode === "battle") handleBattleKey(e.key);                        // 전투 모드: 방향키 입력
+    if (k === "c") faceBaseline = { x: lastCtrl.x, y: lastCtrl.y };       // C: 현재 자세를 중립 기준으로 재설정
+  });
+  addEventListener("keyup", (e) => { const k=e.key.toLowerCase(); if (k in keys) keys[k]=false; });
+
+  // 전투 방향키 → 방향 문자열 매핑 (나중에 MediaPipe 머리 방향이 이 자리를 대체)
+  const ARROW_MAP = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right" };
+  function handleBattleKey(key) {
+    const dir = ARROW_MAP[key];                                           // 누른 방향
+    if (!dir) return;                                                     // 방향키 아니면 무시
+    if (battle.phase !== "charge" || !battle.armed) return;               // 충전 단계 + 입력 가능일 때만
+    if (dir === battle.targetDir) onCorrectInput();                       // 요구 방향과 일치하면 성공
+  }
+
+  /* =========================================================
+     웹캠 + MediaPipe 얼굴(코) 위치 추적 — 머리 회전이 아닌 "위치"로 조종
+  ========================================================= */
+  const webcamVideo  = document.getElementById("webcam-video");
+  const webcamCanvas = document.getElementById("webcam-canvas");
+
+  let faceLandmarker = null;                                            // MediaPipe 모델
+  let faceReady = false;                                                // 모델 준비 여부
+  let lastFaceTime = -1;                                                // 중복 프레임 방지용
+  const faceCtrl = { x: 0, y: 0, active: false };                       // 기준점 대비 코 위치 오프셋(미러 기준)
+  let faceBaseline = null;                                              // 중립(정면) 자세 기준점
+  let faceCapBuf = [];                                                  // 기준점 자동 보정용 버퍼
+  let lastCtrl = { x: 0.5, y: 0.5 };                                    // 가장 최근 코 위치(재설정용)
+
+  const DEAD = 0.03;        // 데드존: 이보다 작은 움직임은 무시(가만히 있을 때 떨림 방지)
+  const F_TRIGGER = 0.06;   // 전투 방향 입력으로 인정하는 임계값
+  const F_RETURN  = 0.03;   // 다음 입력 전 중심으로 돌아왔다고 보는 임계값
+
+  // 웹캠 시작 → 모델 로딩
+  async function initFace(stream) {
+    webcamVideo.srcObject = stream; await webcamVideo.play();           // 영상 연결
+    webcamCanvas.width  = webcamVideo.videoWidth  || 320;               // 오버레이 캔버스 크기 = 영상 크기
+    webcamCanvas.height = webcamVideo.videoHeight || 240;
+    setNote("얼굴 인식 로딩…");
+    const fileset = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
+      baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate: "GPU" },
+      runningMode: "VIDEO", numFaces: 1,                                // 얼굴 1개만(가볍게)
+    });
+    faceReady = true;
+    setNote("고개 기울여 이동 · C키: 중심 재설정");
+  }
+  navigator.mediaDevices.getUserMedia({ video:{ width:320, height:240 }, audio:false })
+    .then(initFace)
+    .catch((e)=>{ setNote("웹캠 권한 필요"); console.error(e); });
+
+  // 매 프레임 코 끝(랜드마크 1) 위치 추적 + 시각화
+  function detectFace(now) {
+    if (!faceReady) return;
+    if (webcamVideo.currentTime === lastFaceTime) return; lastFaceTime = webcamVideo.currentTime;
+    const res = faceLandmarker.detectForVideo(webcamVideo, now);
+    const cx = webcamCanvas.getContext("2d");
+    cx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
+    if (!res.faceLandmarks || !res.faceLandmarks.length) { faceCtrl.active = false; return; }
+
+    const nose = res.faceLandmarks[0][1];                               // 코 끝 랜드마크
+    const ctrlX = 1 - nose.x;                                           // 미러 기준 x(고개 오른쪽 → 값 증가)
+    const ctrlY = nose.y;                                               // y(고개 위 → 값 감소)
+    lastCtrl = { x: ctrlX, y: ctrlY };
+
+    if (!faceBaseline) {                                                // 처음 몇 프레임으로 중립 기준점 자동 보정
+      faceCapBuf.push([ctrlX, ctrlY]);
+      if (faceCapBuf.length >= 10) {
+        faceBaseline = {
+          x: faceCapBuf.reduce((s,v)=>s+v[0],0)/faceCapBuf.length,
+          y: faceCapBuf.reduce((s,v)=>s+v[1],0)/faceCapBuf.length,
+        };
+      }
+    } else {
+      faceCtrl.x = ctrlX - faceBaseline.x;                              // 기준점 대비 좌우 오프셋
+      faceCtrl.y = ctrlY - faceBaseline.y;                              // 기준점 대비 상하 오프셋
+      faceCtrl.active = true;
+    }
+
+    // 시각화: 데드존 박스(기준점) + 현재 코 위치 점 (캔버스는 CSS로 미러됨 → 원본 좌표로 그림)
+    const w = webcamCanvas.width, h = webcamCanvas.height;
+    if (faceBaseline) {
+      cx.shadowBlur = 0; cx.strokeStyle = "rgba(255,255,255,0.5)"; cx.lineWidth = 1;
+      const bx = (1 - faceBaseline.x) * w, by = faceBaseline.y * h;     // 기준점을 원본 좌표로 환산
+      cx.strokeRect(bx - DEAD*w, by - DEAD*h, DEAD*2*w, DEAD*2*h);      // 데드존 사각형
+    }
+    cx.fillStyle = "#00d4ff"; cx.shadowColor = "#00d4ff"; cx.shadowBlur = 8;
+    cx.beginPath(); cx.arc(nose.x*w, nose.y*h, 6, 0, Math.PI*2); cx.fill(); // 코 위치 점
+  }
+
+  // 코 위치 오프셋 → 방향 분류(전투용)
+  function classifyFace() {
+    const x = faceCtrl.x, y = faceCtrl.y, ax = Math.abs(x), ay = Math.abs(y);
+    if (ax < F_TRIGGER && ay < F_TRIGGER) return null;                  // 임계값 미만이면 입력 없음
+    if (ax >= ay) return x > 0 ? "right" : "left";                      // 좌우가 더 크면 좌/우
+    return y < 0 ? "up" : "down";                                       // 아니면 위(코 위로)/아래
+  }
+
+  // 전투 중 매 프레임 얼굴 방향 입력 처리(중심 복귀해야 다음 입력 인정)
+  function tickFaceBattle() {
+    if (!faceCtrl.active || battle.phase !== "charge") return;
+    const mag = Math.max(Math.abs(faceCtrl.x), Math.abs(faceCtrl.y));
+    if (battle.faceReturn) { if (mag < F_RETURN) battle.faceReturn = false; return; } // 중심 복귀 대기
+    if (!battle.armed) return;
+    const dir = classifyFace();
+    if (dir && dir === battle.targetDir) { battle.faceReturn = true; onCorrectInput(); } // 요구 방향 일치 → 성공
+  }
+
+  /* =========================================================
+     게임 모드 / 전투 상태
+  ========================================================= */
+  let mode = "world";                                                     // 'world' | 'battle'
+  let battleCooldown = 0;                                                 // 전투 종료 직후 재조우 방지 타이머
+  let gameStarted = false;                                               // 인트로를 닫고 모험 시작했는지
+  let paused = false;                                                    // 패널(기억/엔딩) 표시 중 입력 정지
+  let memoriesFound = 0;                                                 // 되찾은 기억 수
+  let endingShown = false;                                              // 엔딩 표시 여부
+
+  const battle = {                                                        // 전투 진행 상태
+    active:false, phase:"charge",   // phase: 'intro'|'charge'|'anim'|'over'
+    worldRef:null, type:null,
+    monsterHp:100, monsterMaxHp:100, playerHp:100, dmg:100, counter:0,
+    orbsFilled:0, movesPerSpell:5, targetDir:null, lastDir:null, armed:false,
+    boltActive:false, boltT:0, monKick:0, hurtTimer:0,
+  };
+
+  // DOM 단축 참조
+  const $ = (id)=>document.getElementById(id);
+  const battleUI = $("battle-ui"), hudEl = $("hud");
+  function setCmd(t){ $("command-text").innerHTML = t; }                  // 대사 박스 텍스트
+  function setNote(t){ $("webcam-note").textContent = t; }               // 웹캠 박스 하단 안내
+
+  // 안개로 화면을 가렸다가 씬을 바꾸고 다시 걷어내는 전환 연출
+  const transitionEl = $("transition");                                  // 안개 오버레이 요소
+  let transitioning = false;                                             // 전환 진행 중 플래그(중복 방지)
+  function doTransition(swapFn) {
+    if (transitioning) { swapFn(); return; }                             // 이미 전환 중이면 즉시 실행
+    transitioning = true;
+    transitionEl.classList.add("show");                                  // 화면이 안개로 뿌옇게 차오름
+    setTimeout(() => {                                                    // 가장 뿌연 순간에 실제 씬 전환
+      swapFn();
+      setTimeout(() => {                                                  // 잠깐 유지한 뒤
+        transitionEl.classList.remove("show");                           // 안개가 서서히 걷힘
+        setTimeout(() => { transitioning = false; }, 500);               // 페이드아웃 끝나면 잠금 해제
+      }, 150);
+    }, 450);                                                             // CSS 페이드 시간과 맞춤
+  }
+
+  /* ===== 전투 시작 ===== */
+  function startBattle(worldMon) {
+    const type = worldMon.userData.type;                                  // 월드 몬스터의 종류
+    mode = "battle"; battle.active = true; battle.phase = "intro";
+    battle.worldRef = worldMon; battle.type = type;
+    battle.monsterMaxHp = type.hp; battle.monsterHp = type.hp;
+    battle.dmg = type.dmg; battle.counter = type.counter; battle.playerHp = 100;
+    keys.w=keys.a=keys.s=keys.d=false;                                    // 이동 키 초기화
+
+    // 전투 몬스터 메시 생성/교체
+    if (battleMonster) battleScene.remove(battleMonster);
+    battleMonster = makeMonster(type.color);
+    battleMonster.scale.setScalar(type.scale * 1.4);                      // 전투에선 좀 더 크게
+    battleMonster.position.copy(BATTLE_MONSTER_POS);
+    battleScene.add(battleMonster);
+
+    // HUD 갱신
+    $("enemy-name").textContent = type.name; $("enemy-lvl").textContent = type.lvl;
+    updateEnemyHp(); updatePlayerHp();
+    $("direction-prompt").innerHTML = ""; buildOrbs();
+
+    // 화면 전환
+    hudEl.style.display = "none"; battleUI.classList.add("show");
+    setNote("고개를 ↑ ↓ ← → 로 움직여 시전 (방향키도 가능)");
+    renderPass.scene = battleScene; renderPass.camera = battleCam;        // 후처리 대상 = 전투 씬
+
+    setCmd(`앗! <b style="color:#ff6e9c">${type.name}</b>이(가) 나타났다!`);
+    setTimeout(beginPlayerTurn, 1500);                                    // 잠시 후 플레이어 턴
+  }
+
+  /* ===== 플레이어 턴 시작 ===== */
+  function beginPlayerTurn() {
+    battle.phase = "charge"; battle.orbsFilled = 0; buildOrbs();
+    battle.armed = true; battle.targetDir = null; battle.lastDir = null; battle.faceReturn = false;
+    setCmd("🔮 떠오르는 룬 방향으로 <b style='color:#00d4ff'>방향키를 입력!</b>");
+    nextDirection();
+  }
+
+  function buildOrbs() {                                                  // 마력 오브 UI 생성
+    const el = $("orbs"); el.innerHTML = "";
+    for (let i=0;i<battle.movesPerSpell;i++){ const o=document.createElement("div");
+      o.className = "orb" + (i<battle.orbsFilled ? " filled" : ""); el.appendChild(o); }
+  }
+  function nextDirection() {                                              // 다음 요구 방향 무작위 선택
+    const dirs=["up","down","left","right"]; let d;
+    do { d = dirs[Math.floor(Math.random()*4)]; } while (d===battle.lastDir && Math.random()<0.7);
+    battle.lastDir=d; battle.targetDir=d;
+    const info = { up:["▲","위"], down:["▼","아래"], left:["◀","왼쪽"], right:["▶","오른쪽"] }[d];
+    $("direction-prompt").innerHTML = `<div class="dir-arrow">${info[0]}</div><div class="dir-label">${info[1]}</div>`;
+  }
+
+  /* ===== 올바른 방향 입력 ===== */
+  function onCorrectInput() {
+    battle.armed = false;                                                 // 중복 방지(다음 방향까지 잠금)
+    battle.orbsFilled++;
+    const orbs = document.querySelectorAll("#orbs .orb"); if (orbs[battle.orbsFilled-1]) orbs[battle.orbsFilled-1].classList.add("filled");
+    battle.monKick = 0.18;                                                // 작은 피격 흔들림
+    if (battle.orbsFilled >= battle.movesPerSpell) {                      // 다 채우면 시전
+      $("direction-prompt").innerHTML = ""; battle.targetDir = null; fireSpell();
+    } else {                                                              // 아직이면 다음 방향
+      setCmd(`마력 충전… (${battle.orbsFilled}/${battle.movesPerSpell}) → 다음 룬!`);
+      setTimeout(()=>{ battle.armed = true; nextDirection(); }, 180);     // 살짝 텀
+    }
+  }
+
+  /* ===== 마법 시전(투사체 발사) ===== */
+  function fireSpell() {
+    battle.phase = "anim";
+    setCmd("✦ <b style='color:#00d4ff'>룬 마법 발동!</b> ✦");
+    bolt.position.set(BATTLE_PLAYER_POS.x, 2.2, BATTLE_PLAYER_POS.z);     // 플레이어 위치에서 출발
+    bolt.visible = true; battle.boltActive = true; battle.boltT = 0;      // 투사체 애니메이션 시작
+  }
+
+  function onSpellImpact() {                                              // 투사체가 몬스터에 닿은 순간
+    bolt.visible = false; battle.boltActive = false;
+    battle.monKick = 0.5;                                                 // 큰 흔들림
+    $("flash").classList.remove("go"); void $("flash").offsetWidth; $("flash").classList.add("go"); // 화면 플래시
+    battle.monsterHp = Math.max(0, battle.monsterHp - battle.dmg); updateEnemyHp();
+
+    if (battle.monsterHp <= 0) {                                          // 처치 성공
+      setCmd(`<b style="color:#ffd27b">${battle.type.name}</b> 격파!`);
+      battle.phase = "over"; battle.deadTimer = 0; battle.dying = true;   // 사라지는 연출 플래그
+      setTimeout(()=> doTransition(()=> endBattle(true)), 1700);          // 안개 페이드 후 월드 복귀
+    } else {                                                              // 살아있으면 몬스터 턴
+      setCmd(`엘드린의 룬 마법! <b style="color:#ff6e9c">${battle.type.name}</b>에게 명중!`);
+      setTimeout(monsterTurn, 1300);
+    }
+  }
+
+  /* ===== 몬스터 반격 턴 ===== */
+  function monsterTurn() {
+    battle.phase = "anim";
+    setCmd(`<b style="color:#ff6e9c">${battle.type.name}</b>의 반격!`);
+    battle.monLunge = 0.0001;                                             // 돌진 애니메이션 시작(>0이면 진행)
+    setTimeout(()=> {
+      battle.playerHp = Math.max(0, battle.playerHp - battle.counter); updatePlayerHp();
+      battle.hurtTimer = 0.4;                                             // 플레이어 피격 깜빡임
+      if (battle.counter>0) setCmd(`엘드린이 <b style="color:#ff2f6e">${battle.counter}</b>의 피해를 입었다!`);
+      if (battle.playerHp <= 0) { setCmd("엘드린이 쓰러졌다…"); setTimeout(()=> doTransition(()=> endBattle(false)), 1400); }
+      else setTimeout(beginPlayerTurn, 1200);
+    }, 500);
+  }
+
+  /* ===== 전투 종료 → 월드 복귀 ===== */
+  function endBattle(win) {
+    if (win && battle.worldRef) {                                        // 승리 시 해당 몬스터 월드에서 제거
+      world.remove(battle.worldRef);
+      const idx = monsters.indexOf(battle.worldRef); if (idx>=0) monsters.splice(idx,1);
+    }
+    battle.active = false; battle.dying = false; mode = "world";          // 월드 모드로 전환
+    battleUI.classList.remove("show"); hudEl.style.display = "";          // UI 토글
+    setNote("현재: 키보드 임시 조작");
+    renderPass.scene = world; renderPass.camera = worldCam;              // 후처리 대상 = 월드 씬
+    // 플레이어를 살짝 뒤로 물려 즉시 재조우 방지 + 쿨다운
+    player.position.x -= Math.sin(player.rotation.y) * 7;
+    player.position.z -= Math.cos(player.rotation.y) * 7;
+    battleCooldown = 1.2;
+    monsters.forEach(m=> m.userData.met = false);                        // 조우 플래그 초기화
+    if (win) revealMemory();                                             // 승리 시 기억 조각 1개 회수
+  }
+
+  function updateEnemyHp(){ $("enemy-hp").style.width=(battle.monsterHp/battle.monsterMaxHp*100)+"%"; $("enemy-hp-num").textContent=`HP ${battle.monsterHp}/${battle.monsterMaxHp}`; }
+  function updatePlayerHp(){ $("player-hp").style.width=(battle.playerHp/100*100)+"%"; $("player-hp-num").textContent=`HP ${battle.playerHp}/100`; }
+
+  /* =========================================================
+     메인 루프
+  ========================================================= */
+  const clock = new THREE.Clock();
+  const MOVE_SPEED = 12;
+  const encounterEl = $("encounter"); let encTimer = 0; let loreTimer = 0;
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const dt = Math.min(clock.getDelta(), 0.05);
+    const t = clock.elapsedTime;
+
+    detectFace(performance.now());                                       // 얼굴(코) 위치 인식 갱신
+    if (mode === "world") updateWorld(dt);                               // 월드 갱신
+    else { updateBattle(dt, t); tickFaceBattle(); }                      // 전투 갱신 + 얼굴 방향 입력
+
+    // 빛 입자는 월드에서만 보이므로 월드 모드일 때만 갱신
+    if (mode === "world") {
+      const arr = pGeo.attributes.position.array;
+      for (let i=0;i<PCOUNT;i++){ arr[i*3+1]+=dt*1.2; if (arr[i*3+1]>40) arr[i*3+1]=0; }
+      pGeo.attributes.position.needsUpdate = true;
+    }
+
+    composer.render();                                                  // 현재 모드의 씬/카메라로 후처리 렌더
+  }
+
+  /* ===== 월드 업데이트: 이동 + 카메라 추적 + 조우 ===== */
+  function updateWorld(dt) {
+    const active = gameStarted && !paused;                              // 인트로 닫힘 + 패널 안 떠 있을 때만 조작 가능
+    const t = clock.elapsedTime;
+
+    // 이동(조작 가능할 때만)
+    let mx=0, mz=0;
+    if (active) { if (keys.w) mz-=1; if (keys.s) mz+=1; if (keys.a) mx-=1; if (keys.d) mx+=1; }
+    if (active && faceCtrl.active) {                                     // 얼굴(코) 위치로 이동
+      if (faceCtrl.x >  DEAD) mx += 1; else if (faceCtrl.x < -DEAD) mx -= 1; // 고개 좌/우 → 좌/우
+      if (faceCtrl.y < -DEAD) mz -= 1; else if (faceCtrl.y >  DEAD) mz += 1; // 고개 위 → 전진 / 아래 → 후진
+    }
+    if (active && (mx||mz)) {
+      const len=Math.hypot(mx,mz); mx/=len; mz/=len;
+      player.position.x += mx*MOVE_SPEED*dt; player.position.z += mz*MOVE_SPEED*dt;
+      const target=Math.atan2(mx,mz);
+      player.rotation.y += ((target-player.rotation.y+Math.PI)%(Math.PI*2)-Math.PI)*Math.min(1,dt*10); // 부드러운 회전
+    }
+
+    // 카메라 추적(항상)
+    const desired = player.position.clone().add(CAM_OFFSET);
+    worldCam.position.lerp(desired, Math.min(1,dt*4));
+    worldCam.lookAt(player.position.x, player.position.y+1.5, player.position.z);
+
+    // 월드 몬스터 부유/회전(항상)
+    monsters.forEach((m,i)=>{ m.position.y=Math.sin(t*1.5+i)*0.25; m.rotation.y += dt*0.6; });
+    // 표지석 룬 결정 부유/회전(항상)
+    stones.forEach((s)=>{ s.userData.rune.rotation.y += dt*1.2; s.userData.rune.position.y = 2.5 + Math.sin(t*2)*0.12; });
+
+    if (active) {
+      // 표지석/유물 발견 → 로어 표시(각 1회)
+      for (const s of stones) {
+        if (!s.userData.read && s.position.distanceTo(player.position) < 5) {
+          s.userData.read = true; $("lore").textContent = s.userData.text;
+          $("lore").classList.add("show"); loreTimer = 6;
+        }
+      }
+      // 몬스터 조우(쿨다운/전환 중엔 무시)
+      if (battleCooldown<=0 && !transitioning) {
+        for (const mon of monsters) {
+          if (mon.position.distanceTo(player.position) < 5) {           // 충분히 가까우면 전투!
+            encounterEl.classList.add("show"); encTimer = 1.2;
+            doTransition(()=> startBattle(mon));                        // 안개 페이드 후 전투 시작
+            break;
+          }
+        }
+      }
+    }
+    if (battleCooldown>0) battleCooldown -= dt;                          // 쿨다운 감소
+    if (encTimer>0){ encTimer-=dt; if (encTimer<=0) encounterEl.classList.remove("show"); }
+    if (loreTimer>0){ loreTimer-=dt; if (loreTimer<=0) $("lore").classList.remove("show"); }
+  }
+
+  /* ===== 전투 업데이트: 부유/흔들림/투사체/돌진/처치 연출 ===== */
+  function updateBattle(dt, t) {
+    if (!battleMonster) return;
+    // 몬스터 기본 부유
+    let baseY = Math.sin(t*1.5)*0.18;
+    // 작은 피격 흔들림(monKick) 감쇠
+    let kickX = 0;
+    if (battle.monKick>0){ battle.monKick -= dt*2; kickX = Math.sin(t*40)*battle.monKick; }
+    // 반격 돌진(monLunge): 플레이어 쪽으로 갔다 돌아옴
+    let lungeOff = new THREE.Vector3();
+    if (battle.monLunge!==undefined && battle.monLunge>0){
+      battle.monLunge += dt;
+      const p = Math.min(1, battle.monLunge/0.5);                        // 0~1 진행
+      const amt = Math.sin(p*Math.PI);                                   // 갔다 오는 곡선
+      lungeOff.set((BATTLE_PLAYER_POS.x-BATTLE_MONSTER_POS.x)*0.25*amt, 0, (BATTLE_PLAYER_POS.z-BATTLE_MONSTER_POS.z)*0.25*amt);
+      if (p>=1) battle.monLunge = 0;                                     // 끝
+    }
+    battleMonster.position.set(BATTLE_MONSTER_POS.x + kickX + lungeOff.x, baseY, BATTLE_MONSTER_POS.z + lungeOff.z);
+    battleMonster.rotation.y += dt*0.5;
+
+    // 처치 연출(축소 회전하며 사라짐)
+    if (battle.dying){
+      battle.deadTimer += dt;
+      const s = Math.max(0, 1 - battle.deadTimer/1.4) * (battle.type.scale*1.4);
+      battleMonster.scale.setScalar(s); battleMonster.rotation.y += dt*6;
+    }
+
+    // 투사체 이동
+    if (battle.boltActive){
+      battle.boltT += dt/0.5;                                            // 0.5초에 도착
+      const p = Math.min(1, battle.boltT);
+      bolt.position.lerpVectors(
+        new THREE.Vector3(BATTLE_PLAYER_POS.x, 2.2, BATTLE_PLAYER_POS.z),
+        new THREE.Vector3(BATTLE_MONSTER_POS.x, 1.2, BATTLE_MONSTER_POS.z), p);
+      bolt.position.y += Math.sin(p*Math.PI)*1.2;                        // 살짝 포물선
+      if (p>=1) onSpellImpact();
+    }
+
+    // 플레이어 피격 깜빡임
+    if (battle.hurtTimer>0){ battle.hurtTimer -= dt; battlePlayer.visible = (Math.floor(t*20)%2===0); }
+    else battlePlayer.visible = true;
+
+    // 전투 카메라 살짝 흔들림(생동감)
+    battleCam.position.x = -9 + Math.sin(t*0.6)*0.3;
+    battleCam.lookAt(1, 1.5, -2);
+  }
+
+  /* ===== 스토리: 기억 조각 / 엔딩 패널 ===== */
+  function revealMemory() {                                              // 전투 승리 시 호출 — 기억 한 조각 표시
+    paused = true;                                                      // 패널 동안 입력 정지
+    $("memory-rune").textContent = "기억의 조각";
+    $("memory-title").textContent = "기억이 돌아온다…";
+    $("memory-text").textContent = MEMORIES[memoriesFound] || "";
+    memoriesFound++;                                                    // 회수 수 증가
+    $("goal-num").textContent = memoriesFound;                          // 목표 HUD 갱신
+    $("memory-btn").textContent = "계속 ▸";
+    $("memory-panel").classList.add("show");
+  }
+  function showEnding() {                                               // 모든 기억 회수 후
+    endingShown = true;
+    $("memory-rune").textContent = "ᚨ ᚱ ᚲ ᚨ ᚾ ᚨ";
+    $("memory-title").textContent = "모든 기억이 돌아왔다";
+    $("memory-text").textContent = ENDING_TEXT;
+    $("memory-btn").textContent = "다시 눈을 감는다 ▸";
+    $("memory-panel").classList.add("show");
+  }
+
+  // 인트로 표시 + 버튼 연결
+  $("intro-text").textContent = INTRO_TEXT;
+  $("intro").classList.add("show");
+  $("intro-btn").addEventListener("click", ()=>{ $("intro").classList.remove("show"); gameStarted = true; });
+  $("memory-btn").addEventListener("click", ()=>{
+    if (endingShown) { location.reload(); return; }                    // 엔딩 후엔 처음부터 다시
+    $("memory-panel").classList.remove("show");
+    if (memoriesFound >= MEMORIES.length) showEnding();                // 마지막 기억이면 엔딩으로
+    else paused = false;                                               // 아니면 탐험 재개
+  });
+
+  animate();                                                            // 루프 시작
+
+  /* ===== 리사이즈 대응 ===== */
+  addEventListener("resize", () => {
+    worldCam.aspect = battleCam.aspect = innerWidth/innerHeight;
+    worldCam.updateProjectionMatrix(); battleCam.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
+  });
+  </script>
+</body>
+</html>
