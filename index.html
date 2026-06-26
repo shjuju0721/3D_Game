@@ -164,7 +164,7 @@
     이동: <b>고개 기울이기</b> (또는 W A S D)<br>
     전투: 고개를 <b>↑↓←→</b> 로 움직여 시전<br>
     <b>C</b>키: 중심 자세 재설정 · 몬스터에 다가가면 전투
-    <div id="goal">되찾은 기억 <b id="goal-num">0</b> / 6</div>
+    <div id="goal">물리친 몬스터 <b id="goal-num">0</b> / <b id="goal-total">8</b></div>
   </div>
 
   <!-- 조우 배너 -->
@@ -245,7 +245,9 @@
   import { RenderPass } from "three/addons/postprocessing/RenderPass.js";           // 씬 렌더 패스
   import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"; // 블룸 패스
   import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-  import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs"; // MediaPipe 얼굴 랜드마크           // 톤매핑/출력 패스
+  import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs"; // MediaPipe 얼굴 랜드마크
+  import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";                  // .glb 모델 로더
+           // 톤매핑/출력 패스
 
   /* ===== 색 팔레트 (차분/몽환) ===== */
   const COL_SKY_TOP="#aec6e8", COL_SKY_BOTTOM="#cdd9e5", COL_FOG="#c2d1e0", COL_GROUND="#7a8b5c";
@@ -291,35 +293,44 @@
     return g;
   }
 
-  // --- 몬스터: 다면체 몸통 + 뿔 + 빛나는 눈 (color로 종류 구분) ---
-  function makeMonster(color) {
-    const m = new THREE.Group();
-    const mb = new THREE.Mesh(                                                                   // 몸통
-      new THREE.IcosahedronGeometry(0.9, 0),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.9, flatShading: true, emissive: 0x1a0a14, emissiveIntensity: 0.6 }));
-    mb.position.y = 1.0; mb.castShadow = true; m.add(mb);
-    const hornMat = new THREE.MeshStandardMaterial({ color: 0x2c2030, flatShading: true });      // 뿔
-    for (const dx of [-0.35, 0.35]) {
-      const h = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.6, 6), hornMat);
-      h.position.set(dx, 1.7, 0); m.add(h);
-    }
-    const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffe14d, emissive: 0xffcc00, emissiveIntensity: 1.3 }); // 빛나는 눈
-    for (const dx of [-0.3, 0.3]) {
-      const e = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), eyeMat);
-      e.position.set(dx, 1.1, 0.8); m.add(e);
-    }
-    m.userData.bodyMat = mb.material;                                                            // (피격 발광용) 몸통 재질 저장
-    return m;
-  }
-
   /* =========================================================
-     몬스터 종류 데이터 (전투 스탯/외형)
+     몬스터 종류 데이터 (각자 다른 .glb 모델 + 레벨/스탯)
+     레벨 오름차순: 슬라임 < 좀비 < 블루 데몬 < 자이언트
   ========================================================= */
   const MONSTER_TYPES = [
-    { name:"고블린 척후병", lvl:"Lv.5",  color:0x6e3b52, scale:1.0, hp:100, dmg:100, counter:0  },
-    { name:"그림자 늑대",   lvl:"Lv.9",  color:0x3b4a6e, scale:1.2, hp:100, dmg:50,  counter:18 },
-    { name:"마왕 발록",     lvl:"Lv.20", color:0x6e2b2b, scale:1.5, hp:120, dmg:40,  counter:22 },
+    { name:"슬라임",     lvl:"Lv.3",  file:"Slime Enemy.glb", scale:1.3, hp:50,  dmg:50, counter:0  },
+    { name:"좀비",       lvl:"Lv.8",  file:"Zombie.glb",      scale:2.2, hp:100, dmg:50, counter:12 },
+    { name:"블루 데몬",  lvl:"Lv.14", file:"Blue Demon.glb",  scale:2.6, hp:120, dmg:40, counter:16 },
+    { name:"자이언트",   lvl:"Lv.22", file:"Giant.glb",       scale:3.4, hp:160, dmg:40, counter:18 },
   ];
+
+  // --- 몬스터: 각 .glb를 인스턴스별로 로드(개별 스켈레톤/믹서)하여 애니메이션 재생 ---
+  // (스킨드 메시는 변형 없이 원본 그대로 쓰고, 크기는 몬스터 그룹의 scale로 조절)
+  function makeMonster(type, onReady) {
+    const g = new THREE.Group();
+    new GLTFLoader().load(type.file, (gltf) => {
+      const model = gltf.scene;
+      model.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
+      g.add(model);
+      const clips = gltf.animations || [];
+      const ch = { mixer:null, idle:null, walk:null, attack:null, death:null, hit:null, any:null, current:null };
+      if (clips.length) {
+        const mixer = new THREE.AnimationMixer(model); mixers.push(mixer); ch.mixer = mixer;
+        const find = (...k) => clips.find(cl => { const n = cl.name.toLowerCase(); return k.some(x => n.includes(x)); });
+        const A = (cl) => cl ? mixer.clipAction(cl) : null;
+        ch.any    = A(clips[0]);
+        ch.idle   = A(find("idle")) || ch.any;
+        ch.walk   = A(find("walk","hop","crawl","run")) || ch.idle;       // 슬라임은 Hop을 걷기로
+        ch.attack = A(find("attack","punch")) || A(find("hop")) || ch.idle;
+        ch.death  = A(find("death"));
+        ch.hit    = A(find("hitreact","hitrecieve","recievehit"));
+      }
+      g.userData.char = ch;
+      playAnim(ch, "idle");
+      onReady && onReady(ch);
+    }, undefined, (e) => console.error(type.file + " 로드 실패:", e));
+    return g;
+  }
 
   /* ===== 스토리 데이터: "잃어버린 기억" ===== */
   const INTRO_TEXT =                                                      // 시작 인트로 내레이션
@@ -378,8 +389,54 @@
   const worldCam = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 500);
   const CAM_OFFSET = new THREE.Vector3(0, 9, 13);                         // 캐릭터 기준 오프셋
 
+  // ===== 주인공: Character Animated.glb 로 생성 (애니메이션 포함) =====
+  const mixers = [];                                                                 // 모든 애니메이션 믹서
+
+  // group 안에 캐릭터 모델을 정규화해서 넣고, 애니메이션을 준비
+  function loadCharacterInto(group, opts, onReady) {
+    new GLTFLoader().load("Character Animated.glb", (gltf) => {
+      const model = gltf.scene;
+      model.traverse(o => { if (o.isMesh) {
+        o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false;          // 스킨드 메시 컬링 방지
+        const mats = Array.isArray(o.material) ? o.material : [o.material];
+        mats.forEach(m => { if (m) m.side = THREE.DoubleSide; });                       // 노멀 뒤집힘 대비
+      } });
+      // 이 모델은 idle 애니메이션이 적용되면 이미 똑바로 선 적당한 크기로 렌더됨.
+      // 스킨드 메시는 스케일/회전 시 렌더가 깨지므로 원본 변형 없이 그대로 사용한다.
+      const holder = new THREE.Group(); holder.add(model); holder.rotation.y = opts.faceOffset || 0; group.add(holder);
+      // 애니메이션 준비(대기/걷기 자동 탐색)
+      const clips = gltf.animations || [];
+      const ch = { mixer:null, idle:null, walk:null, any:null, current:null };
+      if (clips.length) {
+        const mixer = new THREE.AnimationMixer(model); mixers.push(mixer); ch.mixer = mixer;
+        const find = (...k) => clips.find(cl => k.some(x => cl.name.toLowerCase().includes(x)));
+        const idleC = find("idle","breath","stand","survey","wait") || clips[0];
+        const walkC = find("walk","run","move","jog") || idleC;
+        ch.idle = idleC && mixer.clipAction(idleC);
+        ch.walk = walkC && mixer.clipAction(walkC);
+        ch.any  = mixer.clipAction(clips[0]);
+      }
+      onReady && onReady(ch);
+    }, undefined, (e) => console.error("Character Animated.glb 로드 실패:", e));
+  }
+  // 애니메이션 전환(부드러운 크로스페이드). kind: idle/walk/attack/death/hit, opts:{once,force}
+  function playAnim(c, kind, opts) {
+    if (!c || !c.mixer) return;
+    const a = c[kind] || c.idle || c.any;
+    if (!a) return;
+    const force = opts && opts.force;
+    if (c.current === a && !force) return;
+    if (c.current && c.current !== a) c.current.fadeOut(0.18);
+    if (opts && opts.once) { a.reset(); a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; a.fadeIn(0.08).play(); }
+    else { a.reset(); a.setLoop(THREE.LoopRepeat, Infinity); a.clampWhenFinished = false; a.fadeIn(0.18).play(); }
+    c.current = a;
+  }
+  function animDuration(c, kind) { const a = c && c[kind]; return (a && a._clip && a._clip.duration) || 1; }
+
   // 월드 플레이어
-  const player = makeWizard(); player.position.set(0,0,0); world.add(player);
+  const player = new THREE.Group(); player.position.set(0,0,0); world.add(player);   // 캐릭터 모델 컨테이너
+  let worldChar = null;
+  loadCharacterInto(player, { height: 2.4, faceOffset: 0 }, (c) => { worldChar = c; playAnim(worldChar, "idle"); });
 
   // 나무
   function makeTree() {
@@ -404,16 +461,19 @@
   for (let i=0;i<32;i++){ const r=makeRock();                                         // 바위 32
     r.position.x=(Math.random()-0.5)*300; r.position.z=(Math.random()-0.5)*300; world.add(r); } // ±150 범위
 
-  // 월드 몬스터(아이콘) — 각자 종류를 부여, 맵 전체에 넓게 배치
+  // 월드 몬스터 — 4종을 각각 같은 수(PER_TYPE)만큼 맵 전체에 넓게 배치
   const monsters = [];
-  for (let i=0;i<6;i++){
-    const type = MONSTER_TYPES[Math.floor(Math.random()*MONSTER_TYPES.length)];        // 랜덤 종류
-    const mon = makeMonster(type.color); mon.scale.setScalar(type.scale);
-    mon.position.set((Math.random()-0.5)*220,0,(Math.random()-0.5)*220);               // ±110 범위로 넓게
-    if (mon.position.length()<35) mon.position.z -= 40;                                 // 시작점과 너무 가까우면 밀기
-    mon.userData.type = type;                                                           // 전투용 데이터 저장
-    world.add(mon); monsters.push(mon);
-  }
+  const PER_TYPE = 2;                                                                   // 종류당 마리 수(4종 × 2 = 8마리)
+  MONSTER_TYPES.forEach(type => {
+    for (let k=0;k<PER_TYPE;k++){
+      const mon = makeMonster(type); mon.scale.setScalar(type.scale);
+      mon.position.set((Math.random()-0.5)*220,0,(Math.random()-0.5)*220);             // ±110 범위로 넓게
+      if (mon.position.length()<35) mon.position.z -= 40;                               // 시작점과 너무 가까우면 밀기
+      mon.userData.type = type;                                                         // 전투용 데이터 저장
+      world.add(mon); monsters.push(mon);
+    }
+  });
+  const totalMonsters = monsters.length;                                                // 전체 몬스터 수(목표/엔딩용)
 
   // 표지석/유물(빛나는 룬 비석) — 다가가면 환경 서사 표시
   function makeStone() {
@@ -471,10 +531,12 @@
   const monsterPlat = makePlatform(0x5b3a6a); monsterPlat.position.set(BATTLE_MONSTER_POS.x,0.2,BATTLE_MONSTER_POS.z); battleScene.add(monsterPlat);
 
   // 전투용 플레이어(뒷모습): 카메라가 뒤에 있으므로 몬스터를 바라보게 회전
-  const battlePlayer = makeWizard();
+  const battlePlayer = new THREE.Group();
   battlePlayer.position.copy(BATTLE_PLAYER_POS);
-  battlePlayer.lookAt(BATTLE_MONSTER_POS.x, 1, BATTLE_MONSTER_POS.z);     // 몬스터 쪽을 향함 = 등이 카메라로
+  battlePlayer.lookAt(BATTLE_MONSTER_POS.x, BATTLE_PLAYER_POS.y, BATTLE_MONSTER_POS.z); // 몬스터 쪽을 향함 = 등이 카메라로
   battleScene.add(battlePlayer);
+  let battleChar = null;
+  loadCharacterInto(battlePlayer, { height: 2.6, faceOffset: 0 }, (c) => { battleChar = c; playAnim(battleChar, "idle"); });
 
   // 전투용 몬스터(매 전투마다 교체할 자리)
   let battleMonster = null;
@@ -661,11 +723,13 @@
     battle.dmg = type.dmg; battle.counter = type.counter; battle.playerHp = 100;
     keys.w=keys.a=keys.s=keys.d=false;                                    // 이동 키 초기화
 
-    // 전투 몬스터 메시 생성/교체
+    // 전투 몬스터 메시 생성/교체 (애니메이션 포함)
     if (battleMonster) battleScene.remove(battleMonster);
-    battleMonster = makeMonster(type.color);
-    battleMonster.scale.setScalar(type.scale * 1.4);                      // 전투에선 좀 더 크게
+    battle.char = null;
+    battleMonster = makeMonster(type, (ch) => { battle.char = ch; });     // 로드되면 char 저장
+    battleMonster.scale.setScalar(type.scale * 1.1);                      // 전투에선 좀 더 크게
     battleMonster.position.copy(BATTLE_MONSTER_POS);
+    battleMonster.lookAt(BATTLE_PLAYER_POS.x, BATTLE_MONSTER_POS.y, BATTLE_PLAYER_POS.z); // 플레이어를 향함
     battleScene.add(battleMonster);
 
     // HUD 갱신
@@ -735,9 +799,14 @@
     if (battle.monsterHp <= 0) {                                          // 처치 성공
       setCmd(`<b style="color:#ffd27b">${battle.type.name}</b> 격파!`);
       battle.phase = "over"; battle.deadTimer = 0; battle.dying = true;   // 사라지는 연출 플래그
-      setTimeout(()=> doTransition(()=> endBattle(true)), 1700);          // 안개 페이드 후 월드 복귀
+      if (battle.char && battle.char.death) playAnim(battle.char, "death", {once:true, force:true}); // 사망 모션
+      setTimeout(()=> doTransition(()=> endBattle(true)), 1900);          // 안개 페이드 후 월드 복귀
     } else {                                                              // 살아있으면 몬스터 턴
       setCmd(`엘드린의 룬 마법! <b style="color:#ff6e9c">${battle.type.name}</b>에게 명중!`);
+      if (battle.char && battle.char.hit) {                               // 피격 모션 후 대기 복귀
+        playAnim(battle.char, "hit", {once:true, force:true});
+        setTimeout(()=> playAnim(battle.char, "idle", {force:true}), animDuration(battle.char,"hit")*1000);
+      }
       setTimeout(monsterTurn, 1300);
     }
   }
@@ -746,7 +815,11 @@
   function monsterTurn() {
     battle.phase = "anim";
     setCmd(`<b style="color:#ff6e9c">${battle.type.name}</b>의 반격!`);
-    battle.monLunge = 0.0001;                                             // 돌진 애니메이션 시작(>0이면 진행)
+    battle.monLunge = 0.0001;                                             // 돌진(전진) 시작
+    if (battle.char && battle.char.attack) {                              // 공격 모션(팔 휘두르기 등)
+      playAnim(battle.char, "attack", {once:true, force:true});
+      setTimeout(()=> playAnim(battle.char, "idle", {force:true}), animDuration(battle.char,"attack")*1000);
+    }
     setTimeout(()=> {
       battle.playerHp = Math.max(0, battle.playerHp - battle.counter); updatePlayerHp();
       battle.hurtTimer = 0.4;                                             // 플레이어 피격 깜빡임
@@ -790,6 +863,7 @@
     const dt = Math.min(clock.getDelta(), 0.05);
     const t = clock.elapsedTime;
 
+    mixers.forEach(m => m.update(dt));                                   // 캐릭터 애니메이션 갱신
     detectFace(performance.now());                                       // 얼굴(코) 위치 인식 갱신
     if (mode === "world") updateWorld(dt);                               // 월드 갱신
     else { updateBattle(dt, t); tickFaceBattle(); }                      // 전투 갱신 + 얼굴 방향 입력
@@ -823,6 +897,7 @@
       const target=Math.atan2(mx,mz);
       player.rotation.y += ((target-player.rotation.y+Math.PI)%(Math.PI*2)-Math.PI)*Math.min(1,dt*10); // 부드러운 회전
     }
+    if (worldChar) playAnim(worldChar, (mx||mz) ? "walk" : "idle");      // 이동 중이면 걷기, 아니면 대기
 
     // 카메라 추적(항상)
     const desired = player.position.clone().add(CAM_OFFSET);
@@ -834,7 +909,22 @@
     wSun.target.position.copy(player.position); wSun.target.updateMatrixWorld();
 
     // 월드 몬스터 부유/회전(항상)
-    monsters.forEach((m,i)=>{ m.position.y=Math.sin(t*1.5+i)*0.25; m.rotation.y += dt*0.6; });
+    // 월드 몬스터: 천천히 배회(걷기 애니메이션)
+    monsters.forEach((m)=>{
+      const w = m.userData;
+      if (w.dir === undefined) { w.dir = Math.random()*Math.PI*2; w.turn = 0; w.spd = 1.0 + Math.random()*1.4; }
+      w.turn -= dt;
+      if (w.turn <= 0) { w.dir += (Math.random()-0.5)*1.6; w.turn = 2 + Math.random()*3; }   // 가끔 방향 전환
+      const LIM = 145;
+      if (Math.abs(m.position.x) > LIM || Math.abs(m.position.z) > LIM) {                      // 맵 경계에서 돌아서기
+        w.dir = Math.atan2(-m.position.x, -m.position.z);
+      }
+      m.position.x += Math.sin(w.dir) * w.spd * dt;
+      m.position.z += Math.cos(w.dir) * w.spd * dt;
+      m.position.y = 0;
+      m.rotation.y = w.dir + Math.PI + (w.faceOff || 0);                                       // 이동 방향을 바라봄
+      if (w.char) playAnim(w.char, "walk");                                                    // 걷기 애니메이션
+    });
     // 표지석 룬 결정 부유/회전(항상)
     stones.forEach((s)=>{ s.userData.rune.rotation.y += dt*1.2; s.userData.rune.position.y = 2.5 + Math.sin(t*2)*0.12; });
 
@@ -880,13 +970,16 @@
       if (p>=1) battle.monLunge = 0;                                     // 끝
     }
     battleMonster.position.set(BATTLE_MONSTER_POS.x + kickX + lungeOff.x, baseY, BATTLE_MONSTER_POS.z + lungeOff.z);
-    battleMonster.rotation.y += dt*0.5;
+    if (!battle.dying) battleMonster.lookAt(BATTLE_PLAYER_POS.x, baseY, BATTLE_PLAYER_POS.z); // 플레이어를 계속 바라봄
 
-    // 처치 연출(축소 회전하며 사라짐)
+    // 처치 연출: 사망 애니메이션이 있으면 그대로 재생(스킨드 메시는 스케일 금지),
+    // 없으면 살짝 가라앉으며 사라지는 폴백
     if (battle.dying){
       battle.deadTimer += dt;
-      const s = Math.max(0, 1 - battle.deadTimer/1.4) * (battle.type.scale*1.4);
-      battleMonster.scale.setScalar(s); battleMonster.rotation.y += dt*6;
+      if (!(battle.char && battle.char.death)) {
+        battleMonster.position.y = baseY - battle.deadTimer * 1.2;        // 바닥으로 가라앉음
+        battleMonster.rotation.z += dt * 3;
+      }
     }
 
     // 투사체 이동
@@ -914,7 +1007,7 @@
     paused = true;                                                      // 패널 동안 입력 정지
     $("memory-rune").textContent = "기억의 조각";
     $("memory-title").textContent = "기억이 돌아온다…";
-    $("memory-text").textContent = MEMORIES[memoriesFound] || "";
+    $("memory-text").textContent = MEMORIES[memoriesFound] || "기억의 잔향이 희미하게 스쳐 지나간다…";
     memoriesFound++;                                                    // 회수 수 증가
     $("goal-num").textContent = memoriesFound;                          // 목표 HUD 갱신
     $("memory-btn").textContent = "계속 ▸";
@@ -930,13 +1023,14 @@
   }
 
   // 인트로 표시 + 버튼 연결
+  $("goal-total").textContent = totalMonsters;                        // 목표 HUD 전체 몬스터 수
   $("intro-text").textContent = INTRO_TEXT;
   $("intro").classList.add("show");
   $("intro-btn").addEventListener("click", ()=>{ $("intro").classList.remove("show"); gameStarted = true; });
   $("memory-btn").addEventListener("click", ()=>{
     if (endingShown) { location.reload(); return; }                    // 엔딩 후엔 처음부터 다시
     $("memory-panel").classList.remove("show");
-    if (memoriesFound >= MEMORIES.length) showEnding();                // 마지막 기억이면 엔딩으로
+    if (memoriesFound >= totalMonsters) showEnding();                  // 모든 몬스터 처치 시 엔딩
     else paused = false;                                               // 아니면 탐험 재개
   });
 
