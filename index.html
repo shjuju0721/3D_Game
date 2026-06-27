@@ -160,11 +160,12 @@
 
   <!-- 월드 조작 안내 -->
   <div id="hud">
-    🍃 <b>몽환의 들판</b><br>
+    🍃 <b id="zone-name">몽환의 들판</b><br>
     이동: <b>고개 기울이기</b> (또는 W A S D)<br>
-    전투: 고개를 <b>↑↓←→</b> 로 움직여 시전<br>
+    공격: 전투 중 <b id="hud-action">입 동작</b> 반복!<br>
+    🛡 방어: 몬스터 공격 때 <b>고개 숙이기</b>(턱 당기기)<br>
     <b>C</b>키: 중심 자세 재설정 · 몬스터에 다가가면 전투
-    <div id="goal">물리친 몬스터 <b id="goal-num">0</b> / <b id="goal-total">8</b></div>
+    <div id="goal">구역 <b id="zone-num">1</b>/6 · 처치 <b id="goal-num">0</b>/<b id="goal-total">5</b> · Lv.<b id="lvl-num">1</b></div>
   </div>
 
   <!-- 조우 배너 -->
@@ -184,7 +185,7 @@
       <div class="hp-num" id="enemy-hp-num">HP 100/100</div>
     </div>
     <div class="hpbox player">
-      <div class="row"><span class="nm">엘드린</span><span class="lvl">Lv.12</span></div>
+      <div class="row"><span class="nm">엘드린</span><span class="lvl" id="player-lvl">Lv.1</span></div>
       <div class="hp-track"><div class="hp-fill player" id="player-hp"></div></div>
       <div class="hp-num" id="player-hp-num">HP 100/100</div>
     </div>
@@ -220,7 +221,42 @@
       <div class="panel-rune" id="memory-rune">기억의 조각</div>
       <div class="panel-title" id="memory-title">기억이 돌아온다…</div>
       <div class="panel-text" id="memory-text"></div>
+      <button class="panel-btn" id="record-btn" style="display:none;">기록 다운로드 ⤓</button>
       <button class="panel-btn" id="memory-btn">계속 ▸</button>
+    </div>
+  </div>
+
+  <!-- 구역 시작 동작 가이드 -->
+  <div class="overlay-screen" id="guide-panel">
+    <div class="panel-box">
+      <div class="panel-rune" id="guide-zone">구역 1 / 6</div>
+      <div class="panel-title" id="guide-title">입 벌리기</div>
+      <div class="panel-text" id="guide-text"></div>
+      <div id="guide-live" style="margin-top:18px;font-size:15px;color:#7c86b8;">
+        인식 표시등
+        <span id="guide-dot" style="display:inline-block;width:16px;height:16px;border-radius:50%;background:#444;vertical-align:middle;margin-left:6px;box-shadow:0 0 10px rgba(0,0,0,0);transition:all .2s;"></span>
+      </div>
+      <button class="panel-btn" id="guide-btn">시작 ▸</button>
+    </div>
+  </div>
+
+  <!-- 레벨업 패널 -->
+  <div class="overlay-screen" id="level-panel">
+    <div class="panel-box">
+      <div class="panel-rune">✦ LEVEL UP ✦</div>
+      <div class="panel-title" id="level-title">Lv.2</div>
+      <div class="panel-text" id="level-text"></div>
+      <button class="panel-btn" id="level-btn">다음 구역으로 ▸</button>
+    </div>
+  </div>
+
+  <!-- 게임오버 패널 -->
+  <div class="overlay-screen" id="gameover-panel">
+    <div class="panel-box" style="border-color:rgba(255,60,90,0.6);box-shadow:0 0 50px rgba(0,0,0,0.5),inset 0 0 30px rgba(255,47,110,0.15);">
+      <div class="panel-rune" style="color:#ff2f6e;text-shadow:0 0 12px #ff2f6e;">✖ GAME OVER ✖</div>
+      <div class="panel-title" style="text-shadow:0 0 10px #ff2f6e,0 0 26px #7b2ff7;">엘드린이 쓰러졌다…</div>
+      <div class="panel-text" id="gameover-text"></div>
+      <button class="panel-btn" id="gameover-btn">다시 시작하시겠습니까? ▸</button>
     </div>
   </div>
 
@@ -300,8 +336,8 @@
   const MONSTER_TYPES = [
     { name:"슬라임",     lvl:"Lv.3",  file:"Slime Enemy.glb", scale:1.3, hp:50,  dmg:50, counter:0  },
     { name:"좀비",       lvl:"Lv.8",  file:"Zombie.glb",      scale:2.2, hp:100, dmg:50, counter:12 },
-    { name:"블루 데몬",  lvl:"Lv.14", file:"Blue Demon.glb",  scale:2.6, hp:120, dmg:40, counter:16 },
-    { name:"자이언트",   lvl:"Lv.22", file:"Giant.glb",       scale:3.4, hp:160, dmg:40, counter:18 },
+    { name:"블루 데몬",  lvl:"Lv.14", file:"Blue Demon.glb",  scale:1.4, hp:120, dmg:40, counter:16 },
+    { name:"자이언트",   lvl:"Lv.22", file:"Giant.glb",       scale:1.5, hp:160, dmg:40, counter:18 },
   ];
 
   // --- 몬스터: 각 .glb를 인스턴스별로 로드(개별 스켈레톤/믹서)하여 애니메이션 재생 ---
@@ -363,6 +399,151 @@
     "바람에 깎인 표지석: '탑이 무너진 곳으로… 그가 돌아오기를.'",
     "낡은 목각 인형이 풀숲에 놓여 있다. 작은 손에 꼭 맞을 크기다.",
   ];
+
+  /* =========================================================
+     [Z] 구역(Zone) 데이터 — 6개 구역, 각자 다른 입 동작으로 공격
+       blend = MediaPipe 표정 점수 이름 / thr = 동작 인정 임계값(튜닝 가능)
+       press/smile 는 좌·우 평균을 mouthValue() 에서 따로 처리
+  ========================================================= */
+  const ZONES = [
+    { key:"open",   name:"입 벌리기",     blend:"jawOpen",     thr:0.45,
+      land:"새벽의 들판",   ground:"#7a8b5c", skyTop:"#aec6e8", skyBottom:"#cdd9e5", fog:"#c2d1e0",
+      guide:"입을 크게 <b>벌렸다 다무세요</b>." },
+    { key:"press",  name:"입 다물기",     blend:"mouthPress",  thr:0.40,
+      land:"고요한 호숫가", ground:"#6f8470", skyTop:"#9fb6cf", skyBottom:"#c4d4dd", fog:"#bcccd4",
+      guide:"입술을 <b>꾹 다물었다 푸세요</b>. 꽉 다물수록 마력이 강해집니다." },
+    { key:"smile",  name:"웃기",          blend:"mouthSmile",  thr:0.45,
+      land:"햇살 언덕",     ground:"#8a9152", skyTop:"#bcd0a8", skyBottom:"#e6e2b0", fog:"#d8d6b8",
+      guide:"입꼬리를 올려 <b>활짝 웃었다 푸세요</b>." },
+    { key:"pucker", name:"입술 오므리기", blend:"mouthPucker", thr:0.70,
+      land:"보랏빛 숲",     ground:"#6a5f7a", skyTop:"#9a86b8", skyBottom:"#c9bcd9", fog:"#bcb0cc",
+      guide:"입술을 모아 <b>쭉 내밀었다 푸세요</b> (뽀뽀하듯)." },
+    { key:"puff",   name:"볼 부풀리기",   blend:"puffCombo",   thr:1.0,
+      land:"바람의 협곡",   ground:"#8a7a5c", skyTop:"#d0b78c", skyBottom:"#e8d4ac", fog:"#dcc8a8",
+      guide:"볼에 바람을 넣어 <b>빵빵하게 부풀렸다 빼세요</b> (입술도 살짝 오므린 채).<br>정면 무표정에서 <b>C키</b>로 기준을 잡으면 더 정확합니다." },
+    { key:"tongue", name:"혀 내밀기",     blend:"tongueColor", thr:0.35,
+      land:"잿빛 폐허",     ground:"#5a5a64", skyTop:"#6a6a86", skyBottom:"#9a9ab0", fog:"#8e8ea2",
+      guide:"<b>입을 벌리고</b> 혀를 <b>쭉 내밀었다 넣으세요</b>. (입 안쪽 색으로 인식)" },
+  ];
+  const QUOTA = 5;                 // 구역당 일반 몬스터 수(이걸 다 잡으면 보스 등장)
+  const PLAYER_BASE_DMG = 34;      // 마법 기본 위력(정확도·레벨로 보정됨)
+
+  // ─── 방어(고개 숙이기/턱 당기기) ───
+  const DEFEND_TIME = 1.6;         // 방어 창 길이(초)
+  const DEFEND_DIP = 0.03;         // 창 열린 순간 대비 코가 이만큼 아래로 내려가면 방어 성공
+  const DEFEND_REDUCE = 0.15;      // 방어 성공 시 피해 배율(15%만 받음)
+
+  // ─── 진행 상태 ───
+  let zoneIndex = 0;               // 현재 구역(0~5)
+  let zoneKills = 0;               // 이번 구역에서 잡은 일반 몬스터 수
+  let bossActive = false;          // 보스가 등장했는지
+  let bossDefeated = false;        // 보스를 잡았는지
+
+  // ─── 플레이어 성장(레벨업) ───
+  let level = 1;
+  let playerMaxHp = 100;
+  let dmgMult = 1.0;
+
+  // ─── 재활 기록(구역별) ───
+  const records = [];              // [{zone, action, time, deaths, avgAcc, reps}]
+  let zoneStartTime = 0, zoneDeaths = 0, zoneAccSum = 0, zoneAccN = 0, zoneReps = 0;
+
+  // ─── 입 동작 점수(블렌드셰이프) ───
+  const blend = {};                // 최신 표정 점수 {jawOpen:0.1, ...}
+  let faceLm = null;               // 최신 얼굴 랜드마크 468점(볼 면적 계산용)
+  // 볼 부풀리기 기준값(평소 상태) — 정면 무표정에서 자동/수동(C키) 보정
+  let puffBase = null;             // {cheek, pucker}
+  let puffCapBuf = [];             // 기준값 자동 보정용 버퍼
+
+  function dist2(p, q) {           // 두 랜드마크 사이 화면상 거리
+    const dx = p.x - q.x, dy = p.y - q.y; return Math.hypot(dx, dy);
+  }
+  // 아래 볼 가로 면적(얼굴 세로로 정규화) — 볼을 부풀리면 커짐
+  function cheekMetric() {
+    if (!faceLm) return 0;
+    const fh = dist2(faceLm[10], faceLm[152]);            // 얼굴 세로(이마~턱)
+    if (!fh) return 0;
+    const a = dist2(faceLm[61], faceLm[135]) / fh;        // 왼쪽 입꼬리~턱선
+    const b = dist2(faceLm[291], faceLm[364]) / fh;       // 오른쪽 입꼬리~턱선
+    const c = dist2(faceLm[137], faceLm[366]) / fh;       // 양쪽 볼 너비
+    return (a + b + c) / 3;
+  }
+  // 볼 부풀리기 판정값: 기준 대비 (볼 면적 ↑) AND (입술 오므림 ↑) → 둘 다 커야 1 이상
+  function puffValue() {
+    if (!faceLm || !puffBase) return 0;
+    const dCheek  = cheekMetric() - puffBase.cheek;       // 볼 면적 증가량
+    const dPucker = (blend.mouthPucker || 0) - puffBase.pucker; // 입술 오므림 증가량
+    const cheekRatio  = dCheek  / 0.020;                  // 0.020 넘으면 1
+    const puckerRatio = dPucker / 0.070;                  // 0.070 넘으면 1
+    return Math.max(0, Math.min(cheekRatio, puckerRatio));// 둘 중 작은 쪽(둘 다 충족해야 큼)
+  }
+
+  // ─── 혀 인식(색감 방식): 입 안쪽 영역을 잘라 붉은색+백태(흰/누런) 비율로 판정 ───
+  // (tongue_color_test.py 를 JS canvas 로 포팅)
+  const INNER_LIP = [78, 95, 88, 178, 87, 14, 317, 402, 318, 324,
+                     308, 415, 310, 311, 312, 13, 82, 81, 80, 191]; // 입술 안쪽 둘레 점
+  const TONGUE_OPEN_MIN = 0.25;    // 입을 이만큼은 벌려야 측정(닫힌 입 노이즈 방지)
+  const tongueCanvas = document.createElement("canvas");
+  let tongueRatio = 0;             // 최신 혀 비율(0~1) — 입 안에서 혀 색이 차지하는 비율
+
+  function rgb2hsvCV(r, g, b) {     // RGB → HSV (OpenCV 스케일: H 0~180, S/V 0~255)
+    r/=255; g/=255; b/=255;
+    const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
+    let h=0;
+    if (d!==0){ if(mx===r) h=((g-b)/d)%6; else if(mx===g) h=(b-r)/d+2; else h=(r-g)/d+4; h*=60; if(h<0) h+=360; }
+    return [h/2, (mx===0?0:d/mx)*255, mx*255];
+  }
+  function isTongueColor(H, S, V) { // 붉은색 | 흰 백태 | 누런 백태
+    const red    = ((H<=12) || (H>=160)) && S>=60 && V>=50;
+    const white  = S<=60 && V>=130;
+    const yellow = (H>=13 && H<=35) && S>=30 && S<=180 && V>=80;
+    return red || white || yellow;
+  }
+  function pointInPoly(x, y, poly) {
+    let inside=false;
+    for (let i=0, j=poly.length-1; i<poly.length; j=i++) {
+      const xi=poly[i][0], yi=poly[i][1], xj=poly[j][0], yj=poly[j][1];
+      if (((yi>y)!==(yj>y)) && (x < (xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+    }
+    return inside;
+  }
+  function computeTongueRatio() {
+    if (!faceLm) return 0;
+    if ((blend.jawOpen||0) < TONGUE_OPEN_MIN) return 0;        // 입을 벌려야 측정
+    const vw = webcamVideo.videoWidth, vh = webcamVideo.videoHeight;
+    if (!vw || !vh) return 0;
+    const pts = INNER_LIP.map(i => [faceLm[i].x*vw, faceLm[i].y*vh]);
+    // 중심으로 살짝 수축(파이썬 erode 흉내 — 입술 가장자리 안 잡히게)
+    let cx=0, cy=0; pts.forEach(p=>{cx+=p[0]; cy+=p[1];}); cx/=pts.length; cy/=pts.length;
+    const poly = pts.map(p => [cx+(p[0]-cx)*0.82, cy+(p[1]-cy)*0.82]);
+    let xmin=1e9,ymin=1e9,xmax=-1e9,ymax=-1e9;
+    poly.forEach(p=>{ xmin=Math.min(xmin,p[0]); ymin=Math.min(ymin,p[1]); xmax=Math.max(xmax,p[0]); ymax=Math.max(ymax,p[1]); });
+    xmin=Math.max(0,Math.floor(xmin)); ymin=Math.max(0,Math.floor(ymin));
+    xmax=Math.min(vw,Math.ceil(xmax)); ymax=Math.min(vh,Math.ceil(ymax));
+    const bw=xmax-xmin, bh=ymax-ymin;
+    if (bw<=2 || bh<=2) return 0;
+    tongueCanvas.width=bw; tongueCanvas.height=bh;
+    const tctx=tongueCanvas.getContext("2d", { willReadFrequently:true });
+    tctx.drawImage(webcamVideo, xmin,ymin,bw,bh, 0,0,bw,bh);
+    const data=tctx.getImageData(0,0,bw,bh).data;
+    let mouth=0, tongue=0;
+    for (let y=0; y<bh; y++) for (let x=0; x<bw; x++) {
+      if (!pointInPoly(xmin+x, ymin+y, poly)) continue;
+      mouth++;
+      const idx=(y*bw+x)*4;
+      const hsv=rgb2hsvCV(data[idx], data[idx+1], data[idx+2]);
+      if (isTongueColor(hsv[0], hsv[1], hsv[2])) tongue++;
+    }
+    return mouth>0 ? tongue/mouth : 0;
+  }
+
+  function mouthValue(b) {         // 동작별 현재 세기(0~1, puff는 1 이상도 가능)
+    if (b === "puffCombo")   return puffValue();
+    if (b === "tongueColor") return tongueRatio;
+    if (b === "mouthPress")  return ((blend.mouthPressLeft||0) + (blend.mouthPressRight||0)) / 2;
+    if (b === "mouthSmile")  return ((blend.mouthSmileLeft||0) + (blend.mouthSmileRight||0)) / 2;
+    return blend[b] || 0;
+  }
 
   /* =========================================================
      [A] 월드 씬
@@ -461,19 +642,68 @@
   for (let i=0;i<32;i++){ const r=makeRock();                                         // 바위 32
     r.position.x=(Math.random()-0.5)*300; r.position.z=(Math.random()-0.5)*300; world.add(r); } // ±150 범위
 
-  // 월드 몬스터 — 4종을 각각 같은 수(PER_TYPE)만큼 맵 전체에 넓게 배치
+  // 월드 몬스터 — 구역마다 새로 스폰(spawnZone). 처음엔 비어 있다가 인트로 후 1구역 스폰.
   const monsters = [];
-  const PER_TYPE = 2;                                                                   // 종류당 마리 수(4종 × 2 = 8마리)
-  MONSTER_TYPES.forEach(type => {
-    for (let k=0;k<PER_TYPE;k++){
-      const mon = makeMonster(type); mon.scale.setScalar(type.scale);
-      mon.position.set((Math.random()-0.5)*220,0,(Math.random()-0.5)*220);             // ±110 범위로 넓게
-      if (mon.position.length()<35) mon.position.z -= 40;                               // 시작점과 너무 가까우면 밀기
-      mon.userData.type = type;                                                         // 전투용 데이터 저장
-      world.add(mon); monsters.push(mon);
-    }
-  });
-  const totalMonsters = monsters.length;                                                // 전체 몬스터 수(목표/엔딩용)
+
+  // 구역+보스 여부에 따른 몬스터 스탯(난이도: 구역 갈수록 강해짐)
+  function zoneMonsterStats(zi, isBoss) {
+    const hp = Math.round((isBoss ? 150 : 58) * (1 + 0.25 * zi));        // 체력
+    const counter = Math.round((isBoss ? 58 : 42) * (1 + 0.22 * zi));    // 공격력(방어 못하면 큰 피해)
+    return { hp, counter };
+  }
+  // 구역별 등장 몬스터 종류(점점 강한 모델로 교체) — MONSTER_TYPES 인덱스
+  const ZONE_TYPE_ORDER = [0, 0, 1, 1, 2, 3];   // 슬라임,슬라임,좀비,좀비,데몬,자이언트
+  function zoneType(zi, isBoss) {
+    const baseIdx = isBoss ? Math.min(zi, MONSTER_TYPES.length - 1) : ZONE_TYPE_ORDER[zi];
+    const t = Object.assign({}, MONSTER_TYPES[baseIdx]);            // 복사(원본 보호)
+    const st = zoneMonsterStats(zi, isBoss);
+    t.hp = st.hp; t.counter = st.counter;
+    t.lvl = "Lv." + ((zi + 1) * 4 + (isBoss ? 6 : 0));
+    if (isBoss) { t.name = t.name + " 우두머리"; t.scale = t.scale * 1.3; }
+    return t;
+  }
+
+  // 구역 분위기(땅·하늘·안개 색) 적용
+  function applyZoneTheme(zi) {
+    const z = ZONES[zi];
+    world.background = makeSkyTexture(z.skyTop, z.skyBottom);
+    world.fog.color.set(z.fog);
+    ground.material.color.set(z.ground);
+  }
+
+  // 한 마리 월드에 배치
+  function addWorldMonster(type, isBoss) {
+    const mon = makeMonster(type); mon.scale.setScalar(type.scale);
+    let px, pz;
+    if (isBoss) { px = 0; pz = -42; }
+    else { do { px = (Math.random()-0.5)*180; pz = (Math.random()-0.5)*180; } while (Math.hypot(px,pz) < 30); }
+    mon.position.set(px, 0, pz);
+    mon.userData.type = type; mon.userData.isBoss = !!isBoss;
+    world.add(mon); monsters.push(mon);
+    return mon;
+  }
+
+  // 구역 시작: 기존 몬스터 비우고 일반 몬스터 QUOTA마리 스폰 + 테마 적용
+  function spawnZone(zi) {
+    monsters.forEach(m => world.remove(m)); monsters.length = 0;
+    zoneKills = 0; bossActive = false; bossDefeated = false;
+    for (let k = 0; k < QUOTA; k++) addWorldMonster(zoneType(zi, false), false);
+    $("zone-num").textContent = zi + 1;
+    $("goal-num").textContent = 0;
+    $("goal-total").textContent = QUOTA;
+    $("zone-name").textContent = ZONES[zi].land;
+    $("hud-action").textContent = ZONES[zi].name;
+    applyZoneTheme(zi);
+  }
+
+  // 보스 등장(일반 몬스터 다 잡은 뒤)
+  function spawnBoss(zi) {
+    bossActive = true;
+    const type = zoneType(zi, true);
+    addWorldMonster(type, true);
+    encounterBanner(`👑 ${type.name} 등장!`);
+    $("goal-num").textContent = "보스";
+  }
 
   // 표지석/유물(빛나는 룬 비석) — 다가가면 환경 서사 표시
   function makeStone() {
@@ -568,17 +798,21 @@
     const k = e.key.toLowerCase();
     if (mode === "world" && k in keys) keys[k] = true;                    // 월드 모드: WASD 이동
     if (mode === "battle") handleBattleKey(e.key);                        // 전투 모드: 방향키 입력
-    if (k === "c") faceBaseline = { x: lastCtrl.x, y: lastCtrl.y };       // C: 현재 자세를 중립 기준으로 재설정
+    if (k === "c") {                                                      // C: 현재 자세를 중립 기준으로 재설정
+      faceBaseline = { x: lastCtrl.x, y: lastCtrl.y };
+      puffBase = null; puffCapBuf = [];                                   // 볼 부풀리기 기준값도 다시 잡기
+    }
   });
   addEventListener("keyup", (e) => { const k=e.key.toLowerCase(); if (k in keys) keys[k]=false; });
 
-  // 전투 방향키 → 방향 문자열 매핑 (나중에 MediaPipe 머리 방향이 이 자리를 대체)
-  const ARROW_MAP = { ArrowUp:"up", ArrowDown:"down", ArrowLeft:"left", ArrowRight:"right" };
+  // 전투 키보드 폴백: 충전=Space(입 동작 1회), 방어=↓(또는 Space)
   function handleBattleKey(key) {
-    const dir = ARROW_MAP[key];                                           // 누른 방향
-    if (!dir) return;                                                     // 방향키 아니면 무시
-    if (battle.phase !== "charge" || !battle.armed) return;               // 충전 단계 + 입력 가능일 때만
-    if (dir === battle.targetDir) onCorrectInput();                       // 요구 방향과 일치하면 성공
+    if (battle.phase === "defend" && (key === "ArrowDown" || key === " " || key === "Spacebar")) {
+      battle.defended = true; return;
+    }
+    if ((key === " " || key === "Spacebar") && battle.phase === "charge" && battle.armed) {
+      onMouthRep(0.8);
+    }
   }
 
   /* =========================================================
@@ -609,6 +843,7 @@
     faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
       baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", delegate: "GPU" },
       runningMode: "VIDEO", numFaces: 1,                                // 얼굴 1개만(가볍게)
+      outputFaceBlendshapes: true,                                      // 표정 점수(입벌림·미소·볼·혀 등) 받기 → 입 동작 공격용
     });
     faceReady = true;
     setNote("고개 기울여 이동 · C키: 중심 재설정");
@@ -622,9 +857,30 @@
     if (!faceReady) return;
     if (webcamVideo.currentTime === lastFaceTime) return; lastFaceTime = webcamVideo.currentTime;
     const res = faceLandmarker.detectForVideo(webcamVideo, now);
+    // 표정 점수(블렌드셰이프) 최신값 저장 — 전투에서 입 동작 판정에 사용
+    if (res.faceBlendshapes && res.faceBlendshapes.length) {
+      for (const c of res.faceBlendshapes[0].categories) blend[c.categoryName] = c.score;
+    }
     const cx = webcamCanvas.getContext("2d");
     cx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
-    if (!res.faceLandmarks || !res.faceLandmarks.length) { faceCtrl.active = false; return; }
+    if (!res.faceLandmarks || !res.faceLandmarks.length) { faceCtrl.active = false; faceLm = null; return; }
+
+    faceLm = res.faceLandmarks[0];                                      // 얼굴 랜드마크 저장(볼 면적 계산용)
+    // 볼 부풀리기 기준값(평소 볼 면적·입술 오므림) 자동 보정 — 처음 12프레임 평균
+    if (!puffBase) {
+      puffCapBuf.push([cheekMetric(), blend.mouthPucker || 0]);
+      if (puffCapBuf.length >= 12) {
+        puffBase = {
+          cheek:  puffCapBuf.reduce((s,v)=>s+v[0],0) / puffCapBuf.length,
+          pucker: puffCapBuf.reduce((s,v)=>s+v[1],0) / puffCapBuf.length,
+        };
+        puffCapBuf = [];
+      }
+    }
+
+    // 혀 구역일 때만 입 안쪽 색 분석(혀 비율) — 비용 절약 위해 해당 구역에서만
+    tongueRatio = (ZONES[zoneIndex] && ZONES[zoneIndex].blend === "tongueColor")
+      ? computeTongueRatio() : 0;
 
     const nose = res.faceLandmarks[0][1];                               // 코 끝 랜드마크
     const ctrlX = 1 - nose.x;                                           // 미러 기준 x(고개 오른쪽 → 값 증가)
@@ -664,14 +920,30 @@
     return y < 0 ? "up" : "down";                                       // 아니면 위(코 위로)/아래
   }
 
-  // 전투 중 매 프레임 얼굴 방향 입력 처리(중심 복귀해야 다음 입력 인정)
-  function tickFaceBattle() {
-    if (!faceCtrl.active || battle.phase !== "charge") return;
-    const mag = Math.max(Math.abs(faceCtrl.x), Math.abs(faceCtrl.y));
-    if (battle.faceReturn) { if (mag < F_RETURN) battle.faceReturn = false; return; } // 중심 복귀 대기
-    if (!battle.armed) return;
-    const dir = classifyFace();
-    if (dir && dir === battle.targetDir) { battle.faceReturn = true; onCorrectInput(); } // 요구 방향 일치 → 성공
+  // 전투 중 매 프레임: 이번 구역 입 동작을 인식해 오브 충전
+  //  동작을 "했다가(임계값 넘김) 풀었을 때(임계값 아래)" 1회로 인정 + 그 사이 최대 세기를 정확도로
+  function tickMouthBattle() {
+    if (battle.phase !== "charge" || !battle.armed) return;
+    const z = ZONES[zoneIndex];
+    const v = mouthValue(z.blend);
+    const on = v > z.thr;
+    if (on) battle.repPeak = Math.max(battle.repPeak || 0, v);            // 동작 중 최고 세기 추적
+    if (!on && battle.mouthWasOn) {                                       // 동작을 풀면 1회 완성
+      const peak = battle.repPeak || z.thr; battle.repPeak = 0;
+      onMouthRep(peak);
+    }
+    battle.mouthWasOn = on;
+  }
+
+  // 구역 가이드 패널의 인식 표시등(연습 피드백) — 동작이 잡히면 초록불
+  function updateGuideDot() {
+    const gp = $("guide-panel");
+    if (!gp.classList.contains("show")) return;
+    const z = ZONES[zoneIndex];
+    const ok = mouthValue(z.blend) > z.thr;
+    const dot = $("guide-dot");
+    dot.style.background = ok ? "#3bff7a" : "#444";
+    dot.style.boxShadow = ok ? "0 0 14px #3bff7a" : "0 0 10px rgba(0,0,0,0)";
   }
 
   /* =========================================================
@@ -720,7 +992,8 @@
     mode = "battle"; battle.active = true; battle.phase = "intro";
     battle.worldRef = worldMon; battle.type = type;
     battle.monsterMaxHp = type.hp; battle.monsterHp = type.hp;
-    battle.dmg = type.dmg; battle.counter = type.counter; battle.playerHp = 100;
+    battle.baseDmg = PLAYER_BASE_DMG; battle.counter = type.counter; battle.playerHp = playerMaxHp;
+    $("player-lvl").textContent = "Lv." + level;
     keys.w=keys.a=keys.s=keys.d=false;                                    // 이동 키 초기화
 
     // 전투 몬스터 메시 생성/교체 (애니메이션 포함)
@@ -740,7 +1013,7 @@
     // 화면 전환
     hudEl.style.display = "none"; battleUI.classList.add("show");
     document.getElementById("minimap-box").style.display = "none";        // 전투 중 미니맵 숨김
-    setNote("고개를 ↑ ↓ ← → 로 움직여 시전 (방향키도 가능)");
+    setNote(`${ZONES[zoneIndex].name} 동작을 반복! (Space=연습용)`);
     renderPass.scene = battleScene; renderPass.camera = battleCam;        // 후처리 대상 = 전투 씬
 
     setCmd(`앗! <b style="color:#ff6e9c">${type.name}</b>이(가) 나타났다!`);
@@ -749,10 +1022,10 @@
 
   /* ===== 플레이어 턴 시작 ===== */
   function beginPlayerTurn() {
-    battle.phase = "charge"; battle.orbsFilled = 0; buildOrbs();
-    battle.armed = true; battle.targetDir = null; battle.lastDir = null; battle.faceReturn = false;
-    setCmd("🔮 떠오르는 룬 방향으로 <b style='color:#00d4ff'>방향키를 입력!</b>");
-    nextDirection();
+    battle.phase = "charge"; battle.orbsFilled = 0; battle.accSum = 0;
+    battle.mouthWasOn = false; battle.repPeak = 0;
+    buildOrbs(); battle.armed = true;
+    promptAction();
   }
 
   function buildOrbs() {                                                  // 마력 오브 UI 생성
@@ -760,32 +1033,37 @@
     for (let i=0;i<battle.movesPerSpell;i++){ const o=document.createElement("div");
       o.className = "orb" + (i<battle.orbsFilled ? " filled" : ""); el.appendChild(o); }
   }
-  function nextDirection() {                                              // 다음 요구 방향 무작위 선택
-    const dirs=["up","down","left","right"]; let d;
-    do { d = dirs[Math.floor(Math.random()*4)]; } while (d===battle.lastDir && Math.random()<0.7);
-    battle.lastDir=d; battle.targetDir=d;
-    const info = { up:["▲","위"], down:["▼","아래"], left:["◀","왼쪽"], right:["▶","오른쪽"] }[d];
-    $("direction-prompt").innerHTML = `<div class="dir-arrow">${info[0]}</div><div class="dir-label">${info[1]}</div>`;
+  function promptAction() {                                               // 이번 구역 입 동작을 크게 표시
+    const z = ZONES[zoneIndex];
+    $("direction-prompt").innerHTML =
+      `<div class="dir-label" style="font-size:34px;letter-spacing:2px;">${z.name}!</div>`;
+    setCmd(`🔮 <b style="color:#00d4ff">${z.name}</b> 동작으로 마력을 채우세요! (${battle.orbsFilled}/${battle.movesPerSpell})`);
   }
 
-  /* ===== 올바른 방향 입력 ===== */
-  function onCorrectInput() {
-    battle.armed = false;                                                 // 중복 방지(다음 방향까지 잠금)
+  /* ===== 입 동작 1회 완성(오브 1칸 충전) ===== */
+  function onMouthRep(peak) {
+    battle.armed = false;                                                 // 다음 칸까지 잠시 잠금
     battle.orbsFilled++;
+    battle.accSum += Math.min(1, peak);                                   // 동작 세기 누적(정확도용)
+    zoneReps++;                                                           // 재활 기록(동작 횟수)
     const orbs = document.querySelectorAll("#orbs .orb"); if (orbs[battle.orbsFilled-1]) orbs[battle.orbsFilled-1].classList.add("filled");
     battle.monKick = 0.18;                                                // 작은 피격 흔들림
     if (battle.orbsFilled >= battle.movesPerSpell) {                      // 다 채우면 시전
-      $("direction-prompt").innerHTML = ""; battle.targetDir = null; fireSpell();
-    } else {                                                              // 아직이면 다음 방향
-      setCmd(`마력 충전… (${battle.orbsFilled}/${battle.movesPerSpell}) → 다음 룬!`);
-      setTimeout(()=>{ battle.armed = true; nextDirection(); }, 180);     // 살짝 텀
+      $("direction-prompt").innerHTML = ""; fireSpell();
+    } else {                                                              // 아직이면 다음 동작
+      setCmd(`마력 충전… (${battle.orbsFilled}/${battle.movesPerSpell}) → 한 번 더!`);
+      setTimeout(()=>{ battle.armed = true; promptAction(); }, 160);      // 살짝 텀
     }
   }
 
   /* ===== 마법 시전(투사체 발사) ===== */
   function fireSpell() {
     battle.phase = "anim";
-    setCmd("✦ <b style='color:#00d4ff'>룬 마법 발동!</b> ✦");
+    const acc = battle.accSum / battle.movesPerSpell;                     // 0~1 (동작 세기 평균 = 정확도)
+    battle.lastAcc = acc;
+    battle.dmg = Math.round(battle.baseDmg * (0.5 + 0.7 * acc) * dmgMult);// 정확도 + 레벨로 데미지 보정
+    zoneAccSum += acc; zoneAccN++;                                        // 재활 기록(정확도)
+    setCmd(`✦ <b style='color:#00d4ff'>룬 마법 발동!</b> 정확도 <b style="color:#ffd27b">${Math.round(acc*100)}%</b>`);
     bolt.position.set(BATTLE_PLAYER_POS.x, 2.2, BATTLE_PLAYER_POS.z);     // 플레이어 위치에서 출발
     bolt.visible = true; battle.boltActive = true; battle.boltT = 0;      // 투사체 애니메이션 시작
   }
@@ -811,45 +1089,167 @@
     }
   }
 
-  /* ===== 몬스터 반격 턴 ===== */
+  /* ===== 몬스터 반격 턴 (방어 가능) ===== */
   function monsterTurn() {
     battle.phase = "anim";
-    setCmd(`<b style="color:#ff6e9c">${battle.type.name}</b>의 반격!`);
+    setCmd(`<b style="color:#ff6e9c">${battle.type.name}</b>의 공격 준비…`);
     battle.monLunge = 0.0001;                                             // 돌진(전진) 시작
     if (battle.char && battle.char.attack) {                              // 공격 모션(팔 휘두르기 등)
       playAnim(battle.char, "attack", {once:true, force:true});
       setTimeout(()=> playAnim(battle.char, "idle", {force:true}), animDuration(battle.char,"attack")*1000);
     }
-    setTimeout(()=> {
-      battle.playerHp = Math.max(0, battle.playerHp - battle.counter); updatePlayerHp();
-      battle.hurtTimer = 0.4;                                             // 플레이어 피격 깜빡임
-      if (battle.counter>0) setCmd(`엘드린이 <b style="color:#ff2f6e">${battle.counter}</b>의 피해를 입었다!`);
-      if (battle.playerHp <= 0) { setCmd("엘드린이 쓰러졌다…"); setTimeout(()=> doTransition(()=> endBattle(false)), 1400); }
-      else setTimeout(beginPlayerTurn, 1200);
-    }, 500);
+    setTimeout(openDefendWindow, 350);                                    // 살짝 준비동작 후 방어 창 열기
+  }
+
+  // 방어 창 열기 — 이 동안(막대가 다 닳기 전에) 고개를 숙이면 방어 성공
+  function openDefendWindow() {
+    battle.phase = "defend";
+    battle.defended = false;
+    battle.defendTimer = DEFEND_TIME;
+    battle.defendRefY = null;       // 창 열린 직후의 머리 위치를 기준으로 삼음(다음 프레임에 포착)
+    $("direction-prompt").innerHTML =
+      `<div class="dir-arrow" id="shield-icon">🛡</div>` +
+      `<div class="dir-label" id="shield-label">지금! 고개 숙여 방어</div>` +
+      `<div style="width:220px;height:10px;margin:10px auto 0;background:rgba(255,255,255,0.2);border-radius:6px;overflow:hidden;">` +
+      `<div id="defend-bar" style="height:100%;width:100%;background:#00d4ff;transition:none;"></div></div>`;
+    setCmd("⚠ 공격이 온다! 막대가 닳기 전에 <b style='color:#00d4ff'>고개를 숙여(턱 당겨)</b> 막아라!");
+  }
+
+  // 방어 판정 + 피해 적용
+  function resolveMonsterAttack() {
+    battle.phase = "anim";
+    $("direction-prompt").innerHTML = "";
+    let dmg = battle.counter;
+    if (battle.defended) dmg = Math.round(dmg * DEFEND_REDUCE);           // 방어 성공 → 피해 대폭 감소
+    battle.hurtTimer = 0.4;                                               // 피격 깜빡임
+    $("flash").classList.remove("go"); void $("flash").offsetWidth; $("flash").classList.add("go");
+    battle.playerHp -= dmg;
+    const invincible = (zoneIndex === 0);                                 // 1구역: 쓰러지지 않음(연습)
+    battle.playerHp = Math.max(invincible ? 1 : 0, battle.playerHp);
+    updatePlayerHp();
+    if (battle.defended) setCmd(`🛡 <b style="color:#3bff7a">방어 성공!</b> 피해 ${dmg}`);
+    else setCmd(`방어 실패! <b style="color:#ff2f6e">${dmg}</b>의 피해!`);
+    if (battle.playerHp <= 0) {                                           // (2구역+에서만 도달) 쓰러짐
+      setCmd("엘드린이 쓰러졌다…");
+      setTimeout(()=> doTransition(()=> gameOver()), 1400);              // 게임오버 창 띄우기
+    } else {
+      setTimeout(beginPlayerTurn, 1200);
+    }
+  }
+
+  /* ===== 게임오버 → 쓰러진 구역에서 다시 시작 ===== */
+  function gameOver() {
+    zoneDeaths++;                                                        // 실패 횟수 기록
+    battle.active = false; battle.dying = false; mode = "world";          // 전투 정리 → 월드
+    battleUI.classList.remove("show"); hudEl.style.display = "";
+    $("minimap-box").style.display = "";
+    renderPass.scene = world; renderPass.camera = worldCam;
+    paused = true;                                                       // 패널 동안 입력 정지
+    $("gameover-text").innerHTML =
+      `<b>구역 ${zoneIndex + 1} · ${ZONES[zoneIndex].name}</b> 부터 다시 시작합니다.`;
+    $("gameover-panel").classList.add("show");
+  }
+  // "다시 시작": 쓰러진 구역을 처음부터 다시(몬스터 재배치, 체력 회복)
+  function restartZone() {
+    $("gameover-panel").classList.remove("show");
+    doTransition(() => {
+      spawnZone(zoneIndex);                                              // 같은 구역 다시 스폰(처치수 0)
+      player.position.set(0, 0, 0); player.rotation.y = 0;
+      zoneStartTime = clock.elapsedTime; zoneAccSum = 0; zoneAccN = 0; zoneReps = 0;
+      battleCooldown = 1.5;
+      paused = false;
+    });
   }
 
   /* ===== 전투 종료 → 월드 복귀 ===== */
   function endBattle(win) {
+    let wasBoss = false;
     if (win && battle.worldRef) {                                        // 승리 시 해당 몬스터 월드에서 제거
+      wasBoss = battle.worldRef.userData.isBoss;
       world.remove(battle.worldRef);
       const idx = monsters.indexOf(battle.worldRef); if (idx>=0) monsters.splice(idx,1);
+      if (wasBoss) bossDefeated = true;
+      else { zoneKills++; $("goal-num").textContent = bossActive ? "보스" : zoneKills; }
     }
+    if (!win) zoneDeaths++;                                              // 패배(쓰러짐) 횟수 기록
     battle.active = false; battle.dying = false; mode = "world";          // 월드 모드로 전환
     battleUI.classList.remove("show"); hudEl.style.display = "";          // UI 토글
     document.getElementById("minimap-box").style.display = "";            // 월드 복귀 시 미니맵 표시
-    setNote("현재: 키보드 임시 조작");
+    setNote("고개 기울여 이동 · 몬스터에 다가가면 전투");
     renderPass.scene = world; renderPass.camera = worldCam;              // 후처리 대상 = 월드 씬
     // 플레이어를 살짝 뒤로 물려 즉시 재조우 방지 + 쿨다운
     player.position.x -= Math.sin(player.rotation.y) * 7;
     player.position.z -= Math.cos(player.rotation.y) * 7;
     battleCooldown = 1.2;
     monsters.forEach(m=> m.userData.met = false);                        // 조우 플래그 초기화
-    if (win) revealMemory();                                             // 승리 시 기억 조각 1개 회수
+    if (win) {
+      if (bossDefeated) zoneCleared();                                   // 보스까지 처치 → 구역 클리어
+      else if (zoneKills >= QUOTA && !bossActive) spawnBoss(zoneIndex);  // 할당량 달성 → 보스 등장
+    }
+  }
+
+  /* ===== 구역 클리어 → 기록 저장 + 기억 조각 ===== */
+  function zoneCleared() {
+    records.push({                                                       // 이번 구역 재활 기록
+      zone: zoneIndex + 1,
+      action: ZONES[zoneIndex].name,
+      time: +(clock.elapsedTime - zoneStartTime).toFixed(1),
+      deaths: zoneDeaths,
+      avgAcc: zoneAccN ? Math.round(zoneAccSum / zoneAccN * 100) : 0,
+      reps: zoneReps,
+    });
+    revealMemory();                                                      // 기억 조각 패널 표시(이후 레벨업/다음 구역)
+  }
+
+  /* ===== 레벨업(스탯 상승) ===== */
+  function showLevelUp() {
+    level++; playerMaxHp += 20; dmgMult += 0.15;
+    $("lvl-num").textContent = level;
+    $("level-title").textContent = "Lv." + level;
+    $("level-text").textContent =
+      `최대 체력 +20  (이제 ${playerMaxHp})\n마법 위력 +15%\n\n다음 구역의 어둠은 더 강하다…`;
+    $("level-panel").classList.add("show");
+  }
+
+  /* ===== 구역 시작 동작 가이드 ===== */
+  function showGuide(zi) {
+    paused = true;
+    const z = ZONES[zi];
+    if (z.key === "puff") { puffBase = null; puffCapBuf = []; }          // 볼 구역 진입 시 기준값 새로 잡기(가이드 보는 동안 무표정 기준)
+    $("guide-zone").textContent = `구역 ${zi + 1} / 6 · ${z.land}`;
+    $("guide-title").textContent = z.name;
+    const defendNote = (zi === 0)
+      ? `🛡 몬스터가 공격하면 <b>고개를 숙여(턱 당겨)</b> 막으세요. (이 구역은 쓰러지지 않아요 — 연습!)`
+      : `🛡 몬스터 공격 때 <b>고개 숙여 방어</b>! 막지 못하면 <b style="color:#ff6e9c">쓰러질 수 있습니다.</b>`;
+    $("guide-text").innerHTML =
+      z.guide +
+      `<br><br>전투에서 이 동작을 <b>5번 반복</b>하면 마법이 발사됩니다.<br>` +
+      `아래 표시등이 <b style="color:#3bff7a">초록</b>으로 바뀌도록 한 번 연습해 보세요.<br><br>` +
+      defendNote;
+    $("hud-action").textContent = z.name;
+    $("guide-dot").style.background = "#444";
+    $("guide-panel").classList.add("show");
+  }
+
+  /* ===== 조우/알림 배너 ===== */
+  function encounterBanner(text) {
+    encounterEl.textContent = text;
+    encounterEl.classList.add("show");
+    encTimer = 1.6;
+  }
+
+  /* ===== 재활 기록 CSV 다운로드 ===== */
+  function downloadRecord() {
+    let csv = "구역,동작,시간(초),실패,평균정확도(%),동작횟수\n";
+    records.forEach(r => { csv += `${r.zone},${r.action},${r.time},${r.deaths},${r.avgAcc},${r.reps}\n`; });
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = "rehab_record.csv"; a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   function updateEnemyHp(){ $("enemy-hp").style.width=(battle.monsterHp/battle.monsterMaxHp*100)+"%"; $("enemy-hp-num").textContent=`HP ${battle.monsterHp}/${battle.monsterMaxHp}`; }
-  function updatePlayerHp(){ $("player-hp").style.width=(battle.playerHp/100*100)+"%"; $("player-hp-num").textContent=`HP ${battle.playerHp}/100`; }
+  function updatePlayerHp(){ $("player-hp").style.width=(battle.playerHp/playerMaxHp*100)+"%"; $("player-hp-num").textContent=`HP ${battle.playerHp}/${playerMaxHp}`; }
 
   /* =========================================================
      메인 루프
@@ -866,7 +1266,8 @@
     mixers.forEach(m => m.update(dt));                                   // 캐릭터 애니메이션 갱신
     detectFace(performance.now());                                       // 얼굴(코) 위치 인식 갱신
     if (mode === "world") updateWorld(dt);                               // 월드 갱신
-    else { updateBattle(dt, t); tickFaceBattle(); }                      // 전투 갱신 + 얼굴 방향 입력
+    else { updateBattle(dt, t); tickMouthBattle(); }                     // 전투 갱신 + 입 동작 입력
+    updateGuideDot();                                                    // 구역 가이드 연습 표시등
     drawMinimap(t);                                                      // 미니맵 갱신
 
     // 빛 입자는 월드에서만 보이므로 월드 모드일 때만 갱신
@@ -955,6 +1356,26 @@
   /* ===== 전투 업데이트: 부유/흔들림/투사체/돌진/처치 연출 ===== */
   function updateBattle(dt, t) {
     if (!battleMonster) return;
+
+    // ─── 방어 창 처리: 창 열린 순간보다 고개를 아래로 숙이면 방어 성공 ───
+    if (battle.phase === "defend") {
+      if (faceCtrl.active) {
+        if (battle.defendRefY === null) battle.defendRefY = faceCtrl.y;             // 기준 머리 위치 포착
+        else if (faceCtrl.y - battle.defendRefY > DEFEND_DIP) battle.defended = true; // 기준보다 아래로 숙임
+      }
+      const icon = document.getElementById("shield-icon");
+      const label = document.getElementById("shield-label");
+      const bar = document.getElementById("defend-bar");
+      if (icon)  icon.style.color = battle.defended ? "#3bff7a" : "#fff";
+      if (label) label.textContent = battle.defended ? "방어 성공!" : "지금! 고개 숙여 방어";
+      if (bar) {
+        bar.style.width = Math.max(0, battle.defendTimer / DEFEND_TIME * 100) + "%";
+        bar.style.background = battle.defended ? "#3bff7a" : "#00d4ff";
+      }
+      battle.defendTimer -= dt;
+      if (battle.defendTimer <= 0) resolveMonsterAttack();
+    }
+
     // 몬스터 기본 부유
     let baseY = Math.sin(t*1.5)*0.18;
     // 작은 피격 흔들림(monKick) 감쇠
@@ -1003,36 +1424,66 @@
   }
 
   /* ===== 스토리: 기억 조각 / 엔딩 패널 ===== */
-  function revealMemory() {                                              // 전투 승리 시 호출 — 기억 한 조각 표시
+  function revealMemory() {                                              // 구역 클리어 시 — 기억 한 조각 표시
     paused = true;                                                      // 패널 동안 입력 정지
     $("memory-rune").textContent = "기억의 조각";
     $("memory-title").textContent = "기억이 돌아온다…";
-    $("memory-text").textContent = MEMORIES[memoriesFound] || "기억의 잔향이 희미하게 스쳐 지나간다…";
-    memoriesFound++;                                                    // 회수 수 증가
-    $("goal-num").textContent = memoriesFound;                          // 목표 HUD 갱신
+    $("memory-text").textContent = MEMORIES[zoneIndex] || "기억의 잔향이 희미하게 스쳐 지나간다…";
+    memoriesFound++;
+    $("record-btn").style.display = "none";
     $("memory-btn").textContent = "계속 ▸";
     $("memory-panel").classList.add("show");
   }
-  function showEnding() {                                               // 모든 기억 회수 후
+  function showEnding() {                                               // 모든 구역 클리어 후
     endingShown = true;
+    let summary = ENDING_TEXT + "\n\n── 재활 기록 ──\n";
+    records.forEach(r => { summary += `${r.zone}구역 ${r.action}: ${r.time}s · 실패 ${r.deaths} · 정확도 ${r.avgAcc}%\n`; });
     $("memory-rune").textContent = "ᚨ ᚱ ᚲ ᚨ ᚾ ᚨ";
     $("memory-title").textContent = "모든 기억이 돌아왔다";
-    $("memory-text").textContent = ENDING_TEXT;
+    $("memory-text").textContent = summary;
+    $("record-btn").style.display = "";                                 // 기록 다운로드 버튼 노출
     $("memory-btn").textContent = "다시 눈을 감는다 ▸";
     $("memory-panel").classList.add("show");
   }
 
   // 인트로 표시 + 버튼 연결
-  $("goal-total").textContent = totalMonsters;                        // 목표 HUD 전체 몬스터 수
   $("intro-text").textContent = INTRO_TEXT;
   $("intro").classList.add("show");
-  $("intro-btn").addEventListener("click", ()=>{ $("intro").classList.remove("show"); gameStarted = true; });
+  // 인트로 닫으면 1구역 스폰 + 동작 가이드
+  $("intro-btn").addEventListener("click", ()=>{
+    $("intro").classList.remove("show");
+    gameStarted = true;
+    spawnZone(0);
+    showGuide(0);
+  });
+  // 기억 패널 "계속": 마지막 구역이면 엔딩, 아니면 레벨업
   $("memory-btn").addEventListener("click", ()=>{
     if (endingShown) { location.reload(); return; }                    // 엔딩 후엔 처음부터 다시
     $("memory-panel").classList.remove("show");
-    if (memoriesFound >= totalMonsters) showEnding();                  // 모든 몬스터 처치 시 엔딩
-    else paused = false;                                               // 아니면 탐험 재개
+    if (zoneIndex >= ZONES.length - 1) showEnding();                   // 6구역까지 클리어 → 엔딩
+    else showLevelUp();                                                // 아니면 레벨업 패널
   });
+  // 레벨업 "다음 구역으로": 안개 전환 후 다음 구역 스폰 + 가이드
+  $("level-btn").addEventListener("click", ()=>{
+    $("level-panel").classList.remove("show");
+    doTransition(()=>{
+      zoneIndex++;
+      spawnZone(zoneIndex);
+      player.position.set(0,0,0); player.rotation.y = 0;               // 새 구역 입구로
+      showGuide(zoneIndex);
+    });
+  });
+  // 가이드 "시작": 탐험 시작 + 이번 구역 기록 타이머 초기화
+  $("guide-btn").addEventListener("click", ()=>{
+    $("guide-panel").classList.remove("show");
+    paused = false;
+    zoneStartTime = clock.elapsedTime;
+    zoneDeaths = 0; zoneAccSum = 0; zoneAccN = 0; zoneReps = 0;
+  });
+  // 게임오버 "다시 시작": 쓰러진 구역부터 다시
+  $("gameover-btn").addEventListener("click", restartZone);
+  // 엔딩 기록 다운로드
+  $("record-btn").addEventListener("click", downloadRecord);
 
   /* ===== 미니맵(우측 상단): 몬스터/표지석/플레이어 위치 표시 ===== */
   const miniCanvas = document.getElementById("minimap");
